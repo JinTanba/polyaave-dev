@@ -101,65 +101,6 @@ library Core {
         uint256 currentLiquidityIndex;
     }
 
-    struct CalcSupplyPositionValueInput {
-        PolynanceStorage.SupplyPosition position;
-        uint256 currentLiquidityIndex;
-        uint256 principalWithdrawAmount;  // Current balance from Aave (includes Aave interest)
-    }
-
-    struct HealthFactorParams {
-        uint256 collateralAmount;
-        uint256 collateralPrice;
-        uint256 collateralLiquidationThreshold;
-        uint256 debtAmount;
-        uint256 debtPrice;
-    }
-
-    struct LiquidationQuoteParams {
-        // Debt details to calculate total debt and amount to cover
-        uint256 debtAmount;
-        uint256 debtPrice;
-        // Collateral price to calculate how much collateral to disburse
-        uint256 collateralPrice;
-        // Protocol parameters
-        uint256 liquidationBonus;
-        uint256 closeFactor;
-    }
-
-    struct LiquidationQuote {
-        uint256 debtToCover;
-        uint256 collateralToReceive;
-    }
-
-    /**
-     * @notice Normalize an amount from asset decimals to WAD (1e18)
-     * @param amount The amount in asset decimals
-     * @param decimals The number of decimals for the asset
-     * @return The normalized amount in WAD
-     */
-    function normalizeToWad(uint256 amount, uint8 decimals) internal pure returns (uint256) {
-        if (decimals == 18) return amount;
-        if (decimals > 18) {
-            return amount / (10**(decimals - 18));
-        } else {
-            return amount * (10**(18 - decimals));
-        }
-    }
-
-    /**
-     * @notice Denormalize an amount from WAD (1e18) to asset decimals
-     * @param amount The amount in WAD
-     * @param decimals The target number of decimals
-     * @return The denormalized amount in asset decimals
-     */
-    function denormalizeFromWad(uint256 amount, uint8 decimals) internal pure returns (uint256) {
-        if (decimals == 18) return amount;
-        if (decimals > 18) {
-            return amount * (10**(decimals - 18));
-        } else {
-            return amount / (10**(18 - decimals));
-        }
-    }
 
     function calculateUtilization(
         uint256 totalBorrowedPrincipal,
@@ -300,34 +241,6 @@ library Core {
         return collateralValueInSupplyAsset.percentMul(input.ltv);
     }
 
-    function calculateHealthFactor(
-        CalcHealthFactorInput memory input
-    ) internal pure returns (uint256) {
-        if (input.userTotalDebt == 0) return type(uint256).max;
-        if (input.collateralAmount == 0) return 0; // No collateral, HF is 0
-
-        uint256 collateralValueInSupplyAsset = input.collateralAmount
-            .mulDiv(input.collateralPrice, RAY) // price is Ray
-            .mulDiv(10**input.supplyAssetDecimals, 10**input.collateralAssetDecimals);
-        
-        uint256 adjustedCollateralValue = collateralValueInSupplyAsset
-            .percentMul(input.liquidationThreshold);
-
-        if (adjustedCollateralValue == 0) return 0; // No effective collateral value after threshold, HF is 0
-
-        // Check for potential overflow before rayDiv
-        // if adjustedCollateralValue * RAY would overflow, and debt is non-zero, HF is effectively infinite
-        if (adjustedCollateralValue >= type(uint256).max / RAY) {
-            return type(uint256).max;
-        }
-        
-        return adjustedCollateralValue.rayDiv(input.userTotalDebt);
-    }
-
-    function isPositionHealthy(uint256 healthFactor) internal pure returns (bool) {
-        return healthFactor >= RAY;
-    }
-
     function validateBorrow(
         uint256 newTotalBorrowed, // This should be total principal borrowed
         uint256 totalPolynanceSupply, // Total principal supplied by LPs to Polynance
@@ -376,107 +289,7 @@ library Core {
         scaledBalance = supplyAmount.rayDiv(currentLiquidityIndex);
         return scaledBalance;
     }
-    
-    /**
-     * @notice Calculate the total withdrawable amount for a supply position
-     * @dev This calculates the total amount the LP should receive: principal + Aave interest + Polynance spread interest
-     * @param input Input parameters for position value calculation
-     * @return totalWithdrawable The total amount that can be withdrawn
-     * @return aaveInterest Interest earned from Aave
-     * @return polynanceInterest Interest earned from Polynance spread
-     */
-    function calculateSupplyPositionValue(
-        CalcSupplyPositionValueInput memory input
-    ) internal pure returns (
-        uint256 totalWithdrawable,
-        uint256 aaveInterest,
-        uint256 polynanceInterest
-    ) {
-        // Calculate current value with Polynance interest
-        uint256 polynanceValue = input.position.scaledSupplyBalance.rayMul(input.currentLiquidityIndex);
-        
-        // Calculate Aave interest (scaledSupplyBalancePrincipal includes principal + Aave interest)
-        aaveInterest = input.principalWithdrawAmount > input.position.supplyAmount 
-            ? input.principalWithdrawAmount - input.position.supplyAmount 
-            : 0;
-        
-        // Calculate Polynance interest
-        polynanceInterest = polynanceValue > input.position.supplyAmount 
-            ? polynanceValue - input.position.supplyAmount 
-            : 0;
-        
-        // Total withdrawable = principal + Aave interest + Polynance interest
-        totalWithdrawable = input.position.supplyAmount + aaveInterest + polynanceInterest;
-        
-        return (totalWithdrawable, aaveInterest, polynanceInterest);
-    }
 
-        /**
-     * @notice Calculates the health factor.
-     * @param params A dedicated struct containing all necessary data for this calculation.
-     * @return The health factor in WAD format.
-     */
-    function getHealthFactor(HealthFactorParams memory params)
-        internal
-        pure
-        returns (uint256)
-    {
-        uint256 totalDebtBase = params.debtAmount.wadMul(params.debtPrice);
-        if (totalDebtBase == 0) {
-            return type(uint256).max;
-        }
-
-        uint256 collateralValueBase = params.collateralAmount.wadMul(
-            params.collateralPrice
-        );
-        uint256 effectiveCollateralBase = collateralValueBase.percentMul(
-            params.collateralLiquidationThreshold
-        );
-
-        return effectiveCollateralBase.wadDiv(totalDebtBase);
-    }
-
-    /**
-     * @notice Checks if a position is liquidatable based on its parameters.
-     * @param params The same struct used for getHealthFactor.
-     * @return true if the position can be liquidated, false otherwise.
-     */
-    function isLiquidatable(HealthFactorParams memory params)
-        internal
-        pure
-        returns (bool)
-    {
-        return getHealthFactor(params) <= WadRayMath.WAD;
-    }
-
-    /**
-     * @notice Calculates the liquidation quote.
-     * @param params A dedicated struct containing all necessary data for this calculation.
-     * @return A struct with the calculated `debtToCover` and `collateralToReceive` amounts.
-     */
-    function getLiquidationQuote(LiquidationQuoteParams memory params)
-        internal
-        pure
-        returns (LiquidationQuote memory)
-    {
-        uint256 totalDebtBase = params.debtAmount.wadMul(params.debtPrice);
-        if (totalDebtBase == 0) {
-            return LiquidationQuote(0, 0);
-        }
-
-        uint256 debtToCoverBase = totalDebtBase.percentMul(params.closeFactor);
-
-        uint256 collateralToSeizeBase = debtToCoverBase.percentMul(
-            MAX_BPS + params.liquidationBonus
-        );
-
-        uint256 debtAmount = debtToCoverBase.wadDiv(params.debtPrice);
-        uint256 collateralAmount = collateralToSeizeBase.wadDiv(
-            params.collateralPrice
-        );
-
-        return LiquidationQuote(debtAmount, collateralAmount);
-    }
 
     // ============ Market Resolution Pure Calculations ============
 
