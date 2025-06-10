@@ -1,0 +1,9 @@
+[submodule "lib/aave-v3-core"]
+	path = lib/aave-v3-core
+	url = https://github.com/aave/aave-v3-core
+[submodule "lib/solidity-lib"]
+	path = lib/solidity-lib
+	url = https://github.com/dl-solarity/solidity-lib
+[submodule "lib/conditional-token-index"]
+	path = lib/conditional-token-index
+	url = https://github.com/JinTanba/conditional-token-index

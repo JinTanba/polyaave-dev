@@ -1,0 +1,47 @@
+name: "docs"
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - tests
+    types:
+      - completed
+    branches:
+      - master
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/setup
+      - name: Checkout Docs Repository
+        uses: actions/checkout@v3
+        with:
+          repository: dl-solarity/docs
+          ssh-key: ${{ secrets.DOCS_DEPLOY_KEY }}
+          path: docs
+      - name: Generate and Copy Docs
+        run: |
+          npx hardhat markup --outdir markups
+          rm -rf markups/contracts/mock
+          rm -rf markups/contracts/interfaces
+          rm -rf docs/docs/reference/contracts
+          mkdir -p docs/docs/reference
+          cp -r markups/contracts docs/docs/reference
+      - name: Push Docs
+        run: |
+          git config --global user.name "Docs Syncer"
+          git config --global user.email "contact@distributedlab.com"
+          git fetch --unshallow
+          latest_commit_hash=$(git rev-parse --short HEAD)
+          cd docs
+          git add -f .
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "CI: \`$latest_commit_hash\`"
+            git push
+          fi
