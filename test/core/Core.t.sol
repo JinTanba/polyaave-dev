@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/Core.sol";
-import "../src/libraries/Storage.sol";
+import "../../src/Core.sol";
+import "../../src/libraries/Storage.sol";
 
 contract CoreTest is Test {
     using WadRayMath for uint256;

@@ -2,9 +2,8 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "forge-std/console.sol";
-import "../src/Core.sol";
-import "../src/libraries/Storage.sol";
+import "../../src/Core.sol";
+import "../../src/libraries/Storage.sol";
 
 contract CoreAdvancedTest is Test {
     using WadRayMath for uint256;
@@ -96,9 +95,18 @@ contract CoreAdvancedTest is Test {
     function test_MarketResolution_PartialSpreadPayment() public {
         // Scenario: Enough to pay Aave + protocol but only partial LP spread
         uint256 aaveDebt = 100_000e6;
-        uint256 totalSpread = 10_000e6; // 10k total spread
-        uint256 protocolShare = totalSpread.percentMul(1000); // 1k to protocol
-        uint256 lpSpreadShare = totalSpread - protocolShare; // 9k to LPs
+        
+        // Calculate expected spread correctly
+        uint256 accumulatedSpread = 8_000e6;
+        uint256 currentBorrowIndex = 1.025e27;
+        uint256 totalScaledBorrowed = 100_000e6;
+        uint256 totalNotScaledBorrowed = 100_000e6;
+        
+        // Current spread earned = (scaled * index) - notScaled = 102,500 - 100,000 = 2,500
+        uint256 currentSpreadEarned = totalScaledBorrowed.rayMul(currentBorrowIndex) - totalNotScaledBorrowed;
+        uint256 totalSpread = accumulatedSpread + currentSpreadEarned; // 8,000 + 2,500 = 10,500
+        uint256 protocolShare = totalSpread.percentMul(1000); // 10% of 10,500 = 1,050
+        uint256 lpSpreadShare = totalSpread - protocolShare; // 10,500 - 1,050 = 9,450
         
         // Redeemed amount covers Aave + protocol + half of LP spread
         uint256 redeemed = aaveDebt + protocolShare + (lpSpreadShare / 2);
@@ -106,10 +114,10 @@ contract CoreAdvancedTest is Test {
         Core.CalcThreePoolDistributionInput memory input = Core.CalcThreePoolDistributionInput({
             totalCollateralRedeemed: redeemed,
             aaveCurrentTotalDebt: aaveDebt,
-            accumulatedSpread: 8_000e6,
-            currentBorrowIndex: 1.025e27,
-            totalScaledBorrowed: 100_000e6,
-            totalNotScaledBorrowed: 100_000e6,
+            accumulatedSpread: accumulatedSpread,
+            currentBorrowIndex: currentBorrowIndex,
+            totalScaledBorrowed: totalScaledBorrowed,
+            totalNotScaledBorrowed: totalNotScaledBorrowed,
             reserveFactor: 1000,
             lpShareOfRedeemed: 5000
         });
@@ -207,9 +215,10 @@ contract CoreAdvancedTest is Test {
         
         uint256 spreadRate = Core.calculateSpreadRate(input);
         
-        // At 99.9% utilization, rate should be very high but not overflow
-        assertGt(spreadRate, 0.5e27, "Spread rate should be > 50% at extreme utilization");
-        assertLt(spreadRate, 2e27, "Spread rate should still be reasonable");
+        // At 99.9% utilization with our parameters:
+        // spreadRate = 0.02 + 0.04*0.8 + 0.75*(0.999-0.8) = 0.20125 (~20.125%)
+        assertGt(spreadRate, 0.2e27, "Spread rate should be > 20% at extreme utilization");
+        assertLt(spreadRate, 0.25e27, "Spread rate should be < 25%");
         
         // Test supply rate at extreme utilization
         Core.CalcSupplyRateInput memory supplyInput = Core.CalcSupplyRateInput({
@@ -219,7 +228,9 @@ contract CoreAdvancedTest is Test {
         });
         
         uint256 supplyRate = Core.calculateSupplyRate(supplyInput);
-        assertGt(supplyRate, 0.4e27, "Supply rate should be attractive at high utilization");
+        // Supply rate = spreadRate * utilization = 0.20125 * 0.999 ≈ 0.201
+        assertGt(supplyRate, 0.2e27, "Supply rate should be > 20% at high utilization");
+        assertLt(supplyRate, 0.21e27, "Supply rate should be < 21%");
     }
     
     function test_MarketResolution_TotalLoss() public {
