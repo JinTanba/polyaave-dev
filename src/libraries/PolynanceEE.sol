@@ -29,6 +29,9 @@ library PolynanceEE {
     error NoDebtToRepay();
     error MarketNotMature();
     error NotCurator();
+
+    error PositionHealthy();
+    error NotImplemented();
     
     // Market Resolution Errors
     error MarketAlreadyResolved();

@@ -74,14 +74,6 @@ library Core {
         uint256 collateralAssetDecimals;
     }
 
-    struct CalcHealthFactorInput {
-        uint256 collateralAmount;
-        uint256 collateralPrice;
-        uint256 userTotalDebt;
-        uint256 liquidationThreshold;
-        uint256 supplyAssetDecimals;
-        uint256 collateralAssetDecimals;
-    }
     
     struct CalcSupplyRateInput {
         uint256 totalBorrowedPrincipal;
@@ -389,5 +381,165 @@ library Core {
         );
         
         return claimAmount;
+    }
+
+    // ============ Liquidation Functions ============
+    struct CalcLiquidationAmountsInput {
+        uint256 userTotalDebt;              // Total debt (principal + spread)
+        uint256 collateralAmount;           // User's collateral amount
+        uint256 collateralPrice;            // Current collateral price (Ray)
+        uint256 liquidationCloseFactor;     // Max % of debt liquidatable (basis points)
+        uint256 liquidationBonus;           // Liquidator incentive (basis points)
+        uint256 supplyAssetDecimals;
+        uint256 collateralAssetDecimals;
+    }
+
+    struct CalcHealthFactorInput {
+        uint256 collateralAmount;
+        uint256 collateralPrice;
+        uint256 userTotalDebt;
+        uint256 liquidationThreshold;
+        uint256 supplyAssetDecimals;
+        uint256 collateralAssetDecimals;
+    }
+
+    struct LiquidationAmountsResult {
+        uint256 debtToRepay;                // Amount liquidator must repay
+        uint256 collateralToSeize;          // Collateral liquidator receives
+        uint256 liquidationBonus;           // Bonus amount in collateral
+        bool isFullLiquidation;             // Whether entire position is liquidated
+    }
+
+    struct ValidateLiquidationInput {
+        uint256 healthFactor;               // Current health factor
+        uint256 repayAmount;                // Amount liquidator wants to repay
+        uint256 maxRepayAmount;             // Max allowed by close factor
+        uint256 userTotalDebt;              // User's total debt
+        uint256 availableCollateral;        // User's collateral
+    }
+
+
+    function calculateHealthFactor(
+        CalcHealthFactorInput memory input
+    ) internal pure returns (uint256 healthFactor) {
+        if (input.userTotalDebt == 0) {
+            return type(uint256).max; // Infinite health factor if no debt
+        }
+        
+        // Convert collateral value to supply asset terms
+        uint256 collateralValueInSupplyAsset = input.collateralAmount
+            .mulDiv(input.collateralPrice, RAY) // price is Ray
+            .mulDiv(10**input.supplyAssetDecimals, 10**input.collateralAssetDecimals);
+        
+        uint256 adjustedCollateralValue = collateralValueInSupplyAsset
+            .percentMul(input.liquidationThreshold);
+
+        healthFactor = adjustedCollateralValue.rayDiv(input.userTotalDebt);
+        
+        return healthFactor;
+    }
+
+    function isLiquidatable(uint256 healthFactor) internal pure returns (bool) {
+        return healthFactor < RAY; // Less than 1e27 means unhealthy
+    }
+
+    function calculateLiquidationAmounts(
+        CalcLiquidationAmountsInput memory input
+    ) internal pure returns (LiquidationAmountsResult memory result) {
+        // Calculate max debt that can be repaid based on close factor
+        uint256 maxDebtRepayable = input.userTotalDebt
+            .percentMul(input.liquidationCloseFactor);
+        
+        // Debt to repay is the full user debt if below max, otherwise capped
+        result.debtToRepay = input.userTotalDebt <= maxDebtRepayable ? 
+            input.userTotalDebt : maxDebtRepayable;
+        
+        // Check if this is a full liquidation
+        result.isFullLiquidation = result.debtToRepay == input.userTotalDebt;
+        
+        // Calculate base collateral value equivalent to debt being repaid
+        // First convert debt to collateral asset terms using price
+        uint256 baseCollateralValue = result.debtToRepay
+            .mulDiv(10**input.collateralAssetDecimals, 10**input.supplyAssetDecimals)
+            .rayDiv(input.collateralPrice);
+        
+        // Apply liquidation bonus
+        uint256 bonusMultiplier = MAX_BPS + input.liquidationBonus; // e.g., 10500 for 5% bonus
+        result.collateralToSeize = baseCollateralValue
+            .percentMul(bonusMultiplier);
+        
+        // Calculate the bonus amount separately for transparency
+        result.liquidationBonus = result.collateralToSeize - baseCollateralValue;
+        
+        // Ensure we don't seize more than available collateral
+        if (result.collateralToSeize > input.collateralAmount) {
+            // Adjust to available collateral
+            result.collateralToSeize = input.collateralAmount;
+            
+            // Recalculate debt that can be repaid with available collateral
+            uint256 collateralValueInSupplyAsset = input.collateralAmount
+                .mulDiv(input.collateralPrice, RAY)
+                .mulDiv(10**input.supplyAssetDecimals, 10**input.collateralAssetDecimals);
+            
+            // Remove bonus to get actual repayable debt
+            result.debtToRepay = collateralValueInSupplyAsset
+                .percentDiv(bonusMultiplier);
+            
+            // This is now definitely a full liquidation
+            result.isFullLiquidation = true;
+            result.liquidationBonus = input.collateralAmount - baseCollateralValue;
+        }
+        
+        return result;
+    }
+
+    function validateLiquidation(
+        ValidateLiquidationInput memory input
+    ) internal pure returns (bool isValid, string memory reason) {
+        // Check if position is unhealthy
+        if (!isLiquidatable(input.healthFactor)) {
+            return (false, "Position is healthy");
+        }
+        
+        // Check if repay amount is positive
+        if (input.repayAmount == 0) {
+            return (false, "Repay amount must be positive");
+        }
+        
+        // Check if repay amount exceeds max allowed by close factor
+        if (input.repayAmount > input.maxRepayAmount) {
+            return (false, "Repay amount exceeds close factor limit");
+        }
+        
+        // Check if repay amount exceeds user's total debt
+        if (input.repayAmount > input.userTotalDebt) {
+            return (false, "Repay amount exceeds user debt");
+        }
+        
+        // Check if user has collateral to seize
+        if (input.availableCollateral == 0) {
+            return (false, "No collateral to liquidate");
+        }
+        
+        return (true, "");
+    }
+
+    // Helper function to calculate updated scaled debt after partial liquidation
+    function calculateNewScaledDebt(
+        uint256 currentScaledDebt,
+        uint256 debtRepaid,
+        uint256 currentBorrowIndex
+    ) internal pure returns (uint256 newScaledDebt) {
+        // Calculate current total debt
+        uint256 currentTotalDebt = currentScaledDebt.rayMul(currentBorrowIndex);
+        
+        // Subtract repaid amount
+        uint256 remainingDebt = currentTotalDebt > debtRepaid ? 
+            currentTotalDebt - debtRepaid : 0;
+        
+        // Convert back to scaled amount
+        newScaledDebt = remainingDebt.rayDiv(currentBorrowIndex);
+        
+        return newScaledDebt;
     }
 }

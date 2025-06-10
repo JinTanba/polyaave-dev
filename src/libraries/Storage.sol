@@ -73,12 +73,13 @@ library Storage {
         uint256 slope1;                    // Rate slope when U < optimal (Ray)
         uint256 slope2;                    // Rate slope when U > optimal (Ray)
         uint256 reserveFactor;             // Protocol fee (basis points)
-        
+
         
         // Risk parameters
         uint256 ltv;                       // Max loan-to-value (basis points)
         uint256 liquidationThreshold;      // Liquidation trigger (basis points)
         uint256 liquidationCloseFactor;    //Liquidation trigger (basis points)
+        uint256 liquidationBonus;          // Liquidator incentive (basis points) e.g., 500 = 5%
         uint256 lpShareOfRedeemed;         // LP share of redeemed amount(basis points)
         
         // Market configuration
