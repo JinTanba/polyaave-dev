@@ -6,6 +6,7 @@ import {PercentageMath} from "@aave/protocol/libraries/math/PercentageMath.sol";
 import {MathUtils} from "@aave/protocol/libraries/math/MathUtils.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Storage as PolynanceStorage } from "./libraries/Storage.sol";
+import "forge-std/console.sol";
 
 library Core {
     using WadRayMath for uint256;
@@ -171,6 +172,11 @@ library Core {
     ) {
         uint256 timeDelta = block.timestamp - input.reserve.lastUpdateTimestamp;
         PolynanceStorage.ReserveData memory reserve = input.reserve;
+
+        if(reserve.lastUpdateTimestamp == 0) {
+            console.log("INITIALIZE INDICES");
+            return (WadRayMath.RAY, WadRayMath.RAY);
+        }
 
         uint256 currentTotalSupplyPrincipal = reserve.totalScaledSupplied.rayMul(reserve.liquidityIndex);
         uint256 currentTotalBorrowedPrincipal = reserve.totalScaledBorrowed.rayMul(reserve.variableBorrowIndex);

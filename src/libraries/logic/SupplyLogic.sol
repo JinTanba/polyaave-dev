@@ -17,26 +17,24 @@ library SupplyLogic {
     using WadRayMath for uint256;
     using PercentageMath for uint256;
     
-    /**
-     * @notice Execute supply operation
-     * @param supplier Address of the supplier
-     * @param amount Amount to supply
-     * @param tokenId Token ID for the supply position
-     * @return shares Amount of LP tokens minted
-     */
-    function supply(address supplier, uint256 amount, uint256 tokenId,address predictionAsset) internal returns (uint256 shares) {
+    function supply(
+        Storage.ReserveData storage reserve, 
+        Storage.SupplyPosition storage position,
+        address supplier,
+        uint256 amount
+    ) internal returns (uint256 shares) {
         Storage.$ storage $ = Core.f();
         Storage.RiskParams memory rp = $.riskParams;
         
         // Basic validation
         if (!rp.isActive) revert PolynanceEE.MarketNotActive();
         if (!Core.validateSupply(amount)) revert PolynanceEE.InvalidAmount();
+        console.log("Supplying...");
+        console.log("1. rp.supplyAsset: ", rp.supplyAsset);
+        console.log("   amount: ", amount);
         
-        // Get market data
-        bytes32 marketId = Core.getMarketId(rp.supplyAsset, predictionAsset);
-        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
-        
-        
+
+
         // Update indices before any calculations
         (uint256 newBorrowIndex, uint256 newLiquidityIndex) = Core.updateIndices(
             Core.UpdateIndicesInput({
@@ -44,24 +42,37 @@ library SupplyLogic {
                 riskParams: rp
             })
         );
+
+        console.log("2. newBorrowIndex: ", newBorrowIndex);
+        console.log("   newLiquidityIndex: ", newLiquidityIndex);
+        
         
         // Update storage with new indices
         reserve.variableBorrowIndex = newBorrowIndex;
         reserve.liquidityIndex = newLiquidityIndex;
         reserve.lastUpdateTimestamp = block.timestamp;
         reserve.totalScaledSupplied += Core.calculateScaledValue(amount, newLiquidityIndex);
+
+        console.log("3. reserve.variableBorrowIndex: ", reserve.variableBorrowIndex);
+        console.log("   reserve.liquidityIndex: ", reserve.liquidityIndex);
+        console.log("   reserve.lastUpdateTimestamp: ", reserve.lastUpdateTimestamp);
+        console.log("   reserve.totalScaledSupplied: ", reserve.totalScaledSupplied);
         
         emit PolynanceEE.IndicesUpdated(newBorrowIndex, newLiquidityIndex);
         // supplier -> contract
         IERC20(rp.supplyAsset).safeTransferFrom(supplier, address(this), amount);
+        console.log("4. supplier -> contract: ", amount);
         // contract -> aave
         ILiquidityLayer(rp.liquidityLayer).supply(rp.supplyAsset, amount, address(this));
+        console.log("========================   5. contract -> aave",amount);
         // Calculate scaled balance for Polynance (tracks LP's share of spread earnings)
         uint256 scaledSupplyBalance = Core.calculateScaledValue(amount, newLiquidityIndex);
+        console.log("6. scaledSupplyBalance: ", scaledSupplyBalance);
         // Get or create supply position
-        Storage.SupplyPosition storage position = $.supplyPositions[tokenId];
         position.supplyAmount += amount;
         position.scaledSupplyBalance += scaledSupplyBalance;
+        console.log("7. position.supplyAmount: ", position.supplyAmount);
+        console.log("   position.scaledSupplyBalance: ", position.scaledSupplyBalance);
         
         return amount;
     }

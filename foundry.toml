@@ -9,8 +9,6 @@ remappings = [
     "@cti/=lib/conditional-token-index/src/"
 ]
 
-
-
 # Optimizer settings
 optimizer = true
 optimizer_runs = 200

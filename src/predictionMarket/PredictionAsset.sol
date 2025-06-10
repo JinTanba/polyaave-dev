@@ -5,9 +5,6 @@ import {IPositionToken} from "../interfaces/IPositionToken.sol";
 import {IConditionalTokens} from "@cti/interfaces/IConditionalTokens.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-// interface IPositionToken {
-//     function redeem() external returns(uint256); //send usdc to sender
-// }
 contract PredictionAsset is BaseConditionalTokenIndex,IPositionToken {
     address oracle;
     bytes32 questionId;
