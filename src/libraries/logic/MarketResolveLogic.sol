@@ -40,7 +40,7 @@ library MarketResolveLogic {
         uint256 totalCollateralRedeemed = _redeemAllCollateral(rp);
         
         // Step 2: Get current Aave debt
-        ILiquidityLayer aave = ILiquidityLayer(rp.aaveModule);
+        ILiquidityLayer aave = ILiquidityLayer(rp.liquidityLayer);
         uint256 aaveCurrentTotalDebt = aave.getDebtBalance(rp.supplyAsset, address(this), rp.interestRateMode);
         
         // Step 3: Use pure function to calculate three-pool distribution
@@ -101,7 +101,7 @@ library MarketResolveLogic {
     ) private {
         if (amount == 0) return;
         
-        ILiquidityLayer aave = ILiquidityLayer(rp.aaveModule);
+        ILiquidityLayer aave = ILiquidityLayer(rp.liquidityLayer);
         aave.repay(rp.supplyAsset, amount, rp.interestRateMode, address(this));
     }
     
@@ -110,7 +110,7 @@ library MarketResolveLogic {
         uint256 amount,
         address recipient
     ) private {
-        ILiquidityLayer aave = ILiquidityLayer(rp.aaveModule);
+        ILiquidityLayer aave = ILiquidityLayer(rp.liquidityLayer);
         aave.withdraw(rp.supplyAsset, amount, recipient);
     }
     
@@ -171,7 +171,7 @@ library MarketResolveLogic {
         
         // Calculate LP's share of Aave balance
         uint256 userShare = position.scaledSupplyBalance.percentDiv(reserve.totalScaledSupplied);
-        uint256 currentAaveBalance = ILiquidityLayer(rp.aaveModule).getSupplyBalance(rp.supplyAsset, address(this));
+        uint256 currentAaveBalance = ILiquidityLayer(rp.liquidityLayer).getSupplyBalance(rp.supplyAsset, address(this));
         uint256 userAaveAmount = currentAaveBalance.percentMul(userShare);
         
         resolution.lpTokenClaimed[tokenId] = true;

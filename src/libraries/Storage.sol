@@ -83,7 +83,7 @@ library Storage {
         // Market configuration
         uint256 maturityDate;              // Prediction market resolution
         address priceOracle;               // Oracle for collateral valuation
-        address aaveModule;                // Aave integration contract
+        address liquidityLayer;                // Aave integration contract
         
         // Fixed asset pair
         address supplyAsset;               // Asset LPs deposit (e.g., USDC)

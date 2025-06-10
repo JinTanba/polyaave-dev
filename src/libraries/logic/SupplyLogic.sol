@@ -55,7 +55,7 @@ library SupplyLogic {
         // supplier -> contract
         IERC20(rp.supplyAsset).safeTransferFrom(supplier, address(this), amount);
         // contract -> aave
-        ILiquidityLayer(rp.aaveModule).supply(rp.supplyAsset, amount, address(this));
+        ILiquidityLayer(rp.liquidityLayer).supply(rp.supplyAsset, amount, address(this));
         // Calculate scaled balance for Polynance (tracks LP's share of spread earnings)
         uint256 scaledSupplyBalance = Core.calculateScaledValue(amount, newLiquidityIndex);
         // Get or create supply position

@@ -17,25 +17,17 @@ library BorrowLogic {
     using WadRayMath for uint256;
     using PercentageMath for uint256;
 
+    // ============ Common Internal Functions ============
 
-    function borrow(address borrower, uint256 collateralAmount,address predictionAsset) internal returns (uint256 borrowedAmount) {
-        // Load storage shortcuts
+    /**
+     * @notice Update protocol indices
+     */
+    function _updateIndices(address predictionAsset) private {
         Storage.$ storage $ = Core.f();
         Storage.RiskParams storage rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(predictionAsset, rp.supplyAsset);
+        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
 
-        // Basic checks
-        if (!rp.isActive) revert PolynanceEE.MarketNotActive();
-        if (collateralAmount == 0) revert PolynanceEE.InvalidAmount();
-
-        // Move collateral from borrower to this contract
-        IERC20(predictionAsset).safeTransferFrom(borrower, address(this), collateralAmount);
-
-        // Identify market and reserve data
-        Storage.ReserveData storage reserve = Core.getReserveData(Core.getMarketId(predictionAsset, rp.supplyAsset));
-        Storage.UserPosition storage position = Core.getUserPosition(Core.getMarketId(predictionAsset, rp.supplyAsset), borrower);
-
-
-        // Update Polynance indices before any state-changing math
         (uint256 newBorrowIndex, uint256 newLiquidityIndex) = Core.updateIndices(
             Core.UpdateIndicesInput({
                 reserve: reserve,
@@ -45,11 +37,20 @@ library BorrowLogic {
         reserve.variableBorrowIndex = newBorrowIndex;
         reserve.liquidityIndex = newLiquidityIndex;
         reserve.lastUpdateTimestamp = block.timestamp;
+    }
 
-        // ---------- Calculate max borrow amount ----------
-        // Fetch collateral valuation from oracle (denominated in the supply asset)
+    /**
+     * @notice Calculate maximum borrowable amount for given collateral
+     */
+    function _calculateMaxBorrowable(uint256 collateralAmount, address predictionAsset) private view returns (uint256) {
+        if (collateralAmount == 0) return 0;
+        
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+        
         uint256 currentPriceRay = IOracle(rp.priceOracle).getCurrentPrice(predictionAsset).wadToRay();
-        uint256 maxBorrowForUser = Core.calculateBorrowAble(
+        
+        return Core.calculateBorrowAble(
             Core.CalcMaxBorrowInput({
                 collateralAmount: collateralAmount,
                 collateralPrice: currentPriceRay,
@@ -58,105 +59,180 @@ library BorrowLogic {
                 collateralAssetDecimals: rp.collateralAssetDecimals
             })
         );
-
-        borrowedAmount = maxBorrowForUser;
-
-        // ---------- Interact with underlying liquidity layer (Aave) ----------
-        ILiquidityLayer(rp.aaveModule).borrow(rp.supplyAsset, borrowedAmount, rp.interestRateMode, address(this));
-
-        // Send borrowed funds to user
-        IERC20(rp.supplyAsset).safeTransfer(borrower, borrowedAmount);
-
-        uint256 scaledBorrowed = Core.calculateScaledValue(borrowedAmount, reserve.variableBorrowIndex);
-        // ---------- Update protocol accounting ----------
-        reserve.totalScaledBorrowed += scaledBorrowed;
-        reserve.totalCollateral += collateralAmount;
-        reserve.totalBorrowed += borrowedAmount;
-
-        // Update user position
-        position.collateralAmount += collateralAmount;
-        position.borrowAmount += borrowedAmount;
-        position.scaledDebtBalance += scaledBorrowed;
-
-        return borrowedAmount;
     }
 
-    function repay(address borrower, uint256 amount, address predictionAsset) internal returns (uint256 repaidAmount) {
-        // Load storage shortcuts
+    /**
+     * @notice Execute deposit of collateral
+     */
+    function _executeDeposit(address user, uint256 collateralAmount, address predictionAsset) private {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(predictionAsset, rp.supplyAsset);
+        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
+        Storage.UserPosition storage position = Core.getUserPosition(marketId, user);
+
+        // Transfer collateral
+        IERC20(predictionAsset).safeTransferFrom(user, address(this), collateralAmount);
+        
+        // Update accounting
+        reserve.totalCollateral += collateralAmount;
+        position.collateralAmount += collateralAmount;
+    }
+
+    /**
+     * @notice Execute borrow operation
+     */
+    function _executeBorrow(address borrower, uint256 borrowAmount, address predictionAsset) private returns (uint256) {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(predictionAsset, rp.supplyAsset);
+        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
+        Storage.UserPosition storage position = Core.getUserPosition(marketId, borrower);
+
+        // Borrow from Aave and transfer to user
+        ILiquidityLayer(rp.liquidityLayer).borrow(rp.supplyAsset, borrowAmount, rp.interestRateMode, address(this));
+        IERC20(rp.supplyAsset).safeTransfer(borrower, borrowAmount);
+
+        // Update accounting
+        uint256 scaledBorrowed = Core.calculateScaledValue(borrowAmount, reserve.variableBorrowIndex);
+        reserve.totalScaledBorrowed += scaledBorrowed;
+        reserve.totalBorrowed += borrowAmount;
+        position.borrowAmount += borrowAmount;
+        position.scaledDebtBalance += scaledBorrowed;
+
+        return borrowAmount;
+    }
+
+    // ============ Public Interface Functions ============
+
+    /**
+     * @notice Deposit collateral without borrowing
+     */
+    function deposit(address user, uint256 collateralAmount, address predictionAsset) internal {
         Storage.$ storage $ = Core.f();
         Storage.RiskParams storage rp = $.riskParams;
 
-        // Basic checks
+        if (!rp.isActive) revert PolynanceEE.MarketNotActive();
+        if (collateralAmount == 0) revert PolynanceEE.InvalidAmount();
+
+        _updateIndices(predictionAsset);
+        _executeDeposit(user, collateralAmount, predictionAsset);
+    }
+
+    /**
+     * @notice Borrow against existing collateral
+     */
+    function borrow(address borrower, uint256 borrowAmount, address predictionAsset) internal returns (uint256 borrowedAmount) {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(predictionAsset, rp.supplyAsset);
+        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
+        Storage.UserPosition storage position = Core.getUserPosition(marketId, borrower);
+
+        if (!rp.isActive) revert PolynanceEE.MarketNotActive();
+        if (borrowAmount == 0) revert PolynanceEE.InvalidAmount();
+        if (position.collateralAmount == 0) revert PolynanceEE.InsufficientCollateral();
+
+        _updateIndices(predictionAsset);
+
+        // Validate borrowing capacity
+        uint256 maxBorrowForUser = _calculateMaxBorrowable(position.collateralAmount, predictionAsset);
+        if (borrowAmount > maxBorrowForUser) revert PolynanceEE.InsufficientCollateral();
+
+        // Validate liquidity
+        uint256 totalPolynanceSupply = reserve.totalScaledSupplied.rayMul(reserve.liquidityIndex);
+        uint256 currentTotalBorrowed = reserve.totalScaledBorrowed.rayMul(reserve.variableBorrowIndex);
+        uint256 newTotalBorrowed = currentTotalBorrowed + borrowAmount;
+        
+        if (!Core.validateBorrow(newTotalBorrowed, totalPolynanceSupply, borrowAmount, maxBorrowForUser)) {
+            revert PolynanceEE.InsufficientLiquidity();
+        }
+
+        return _executeBorrow(borrower, borrowAmount, predictionAsset);
+    }
+
+    /**
+     * @notice Get the maximum amount a user can borrow based on their collateral
+     */
+    function getBorrowingCapacity(address user, address predictionAsset) internal view returns (uint256 maxBorrowable) {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(predictionAsset, rp.supplyAsset);
+        Storage.UserPosition storage position = Core.getUserPosition(marketId, user);
+        
+        return _calculateMaxBorrowable(position.collateralAmount, predictionAsset);
+    }
+
+    /**
+     * @notice Original borrow function that deposits collateral and borrows in one transaction
+     */
+    function depositAndBorrow(address borrower, uint256 collateralAmount, address predictionAsset) internal returns (uint256 borrowedAmount) {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+
+        if (!rp.isActive) revert PolynanceEE.MarketNotActive();
+        if (collateralAmount == 0) revert PolynanceEE.InvalidAmount();
+
+        _updateIndices(predictionAsset);
+        _executeDeposit(borrower, collateralAmount, predictionAsset);
+        
+        uint256 maxBorrowForUser = _calculateMaxBorrowable(collateralAmount, predictionAsset);
+        return _executeBorrow(borrower, maxBorrowForUser, predictionAsset);
+    }
+
+    /**
+     * @notice Repay borrowed amount
+     */
+    function repay(address borrower, uint256 amount, address predictionAsset) internal returns (uint256 repaidAmount) {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams storage rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(predictionAsset, rp.supplyAsset);
+        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
+        Storage.UserPosition storage position = Core.getUserPosition(marketId, borrower);
+
         if (amount == 0) revert PolynanceEE.InvalidAmount();
-
-        // Identify market and reserve data
-        Storage.ReserveData storage reserve = Core.getReserveData(Core.getMarketId(predictionAsset, rp.supplyAsset));
-        Storage.UserPosition storage position = Core.getUserPosition(Core.getMarketId(predictionAsset, rp.supplyAsset), borrower);
-
-        // Check if user has any debt
         if (position.scaledDebtBalance == 0) revert PolynanceEE.NoDebtToRepay();
 
         uint256 spreadAtThisRepay = position.scaledDebtBalance.rayMul(reserve.variableBorrowIndex) - position.borrowAmount;
 
-        // Update Polynance indices before calculations
-        (uint256 newBorrowIndex, uint256 newLiquidityIndex) = Core.updateIndices(
-            Core.UpdateIndicesInput({
-                reserve: reserve,
-                riskParams: rp
-            })
-        );
-        reserve.variableBorrowIndex = newBorrowIndex;
-        reserve.liquidityIndex = newLiquidityIndex;
+        _updateIndices(predictionAsset);
+        
         reserve.accumulatedSpread += spreadAtThisRepay;
-        reserve.lastUpdateTimestamp = block.timestamp;
         reserve.totalScaledBorrowed -= position.scaledDebtBalance;  
         reserve.totalBorrowed -= position.borrowAmount;
 
         // Calculate user's share of the Aave debt using scaled balance
         uint256 userDebtShare = position.scaledDebtBalance.percentDiv(reserve.totalScaledBorrowed);
+        
         // Calculate user's total debt including spread interest
         (uint256 userTotalDebt, uint256 principalDebt,) = Core.calculateUserTotalDebt(
             Core.CalcUserTotalDebtInput({
-                principalDebt: ILiquidityLayer(rp.aaveModule).getTotalDebt(rp.supplyAsset,address(this)).percentMul(userDebtShare),
+                principalDebt: ILiquidityLayer(rp.liquidityLayer).getTotalDebt(rp.supplyAsset, address(this)).percentMul(userDebtShare),
                 scaledPolynanceSpreadDebtPrincipal: position.scaledDebtBalance,
                 initialBorrowAmount: position.borrowAmount,
                 currentPolynanceSpreadBorrowIndex: reserve.variableBorrowIndex
             })
         );
 
-        // Lump-sum repayment only - amount must equal total debt
         if (amount != userTotalDebt) revert PolynanceEE.InvalidAmount();
         repaidAmount = userTotalDebt;
 
-        // Transfer repay amount from borrower
+        // Transfer repay amount and repay to Aave
         IERC20(rp.supplyAsset).safeTransferFrom(borrower, address(this), repaidAmount);
+        ILiquidityLayer(rp.liquidityLayer).repay(rp.supplyAsset, principalDebt, rp.interestRateMode, address(this));
 
-
-        // Repay to Aave (only principal debt)
-        ILiquidityLayer(rp.aaveModule).repay(
-            rp.supplyAsset, 
-            principalDebt, 
-            rp.interestRateMode, 
-            address(this)
-        );
-
-        // Clear user position completely
+        // Clear user position and return collateral
         position.borrowAmount = 0;
         position.scaledDebtBalance = 0;
 
-        // Return all collateral
         if (position.collateralAmount > 0) {
             uint256 collateralToReturn = position.collateralAmount;
             position.collateralAmount = 0;
             reserve.totalCollateral = reserve.totalCollateral > collateralToReturn ? 
                 reserve.totalCollateral - collateralToReturn : 0;
             IERC20(predictionAsset).safeTransfer(borrower, collateralToReturn);
-            // emit PolynanceEE.CollateralReturned(borrower, collateralToReturn);
         }
 
-
+        return repaidAmount;
     }
-
-    
-
 }

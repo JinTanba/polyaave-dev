@@ -158,7 +158,7 @@ contract AaveModule is ILiquidityLayer {
         }
     }
 
-    function init(address asset) external {
+    function init(address asset) public {
         DataTypes.ReserveData memory r = AaveLibrary.POOL.getReserveData(asset);
         address variableDebtToken = r.variableDebtTokenAddress;
         AaveLibrary.approveAll(asset);

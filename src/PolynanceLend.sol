@@ -36,7 +36,7 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         $.nextTokenId = 1; // Start token IDs from 1
         address[] memory assets = new address[](1);
         assets[0] = riskParams.supplyAsset;
-        AaveModule aaveModule = new AaveModule();
+        riskParams.liquidityLayer = address(new AaveModule(assets));
     }
 
     // ============ Supply Functions ============
@@ -136,7 +136,7 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         );
         
         // Add Aave base rate
-        ILiquidityLayer aave = ILiquidityLayer(rp.aaveModule);
+        ILiquidityLayer aave = ILiquidityLayer(rp.liquidityLayer);
         uint256 aaveRate = aave.getBorrowRate(rp.supplyAsset, rp.interestRateMode);
         borrowRate = borrowRate + aaveRate;
     }

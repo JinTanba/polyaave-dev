@@ -27,6 +27,6 @@ contract PredictionAsset is BaseConditionalTokenIndex,IPositionToken {
         return IERC20(collateral()).balanceOf(address(this)) - preBalance;
     }
 
-    function resolve()
+    
 
 }
