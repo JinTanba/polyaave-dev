@@ -13,22 +13,30 @@ interface IPool {
 }
 
 interface IWETH is IERC20 {
-    function deposit() external payable;
+    function deposit(uint256 amount) external payable;
 }
 
 
-abstract contract BaseTest is Test {
+contract PolynanceTest is Test {
     // --- FORK CONFIGURATION ---
     string internal constant POLYGON_RPC_URL = "https://polygon-mainnet.g.alchemy.com/v2/cidppsnxqV4JafKXVW7qd9N2x6wTvTpN";
-    uint256 internal constant FORK_BLOCK_NUMBER = 57444249; // A recent, stable block
+    uint256 internal constant FORK_BLOCK_NUMBER = 72384249; // A recent, stable block
 
     // --- POLYGON MAINNET ADDRESSES ---
     IPool   internal constant AAVE_POOL = IPool(0x794a61358D6845594F94dc1DB02A252b5b4814aD);
     IWETH   internal constant WMATIC    = IWETH(0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270);
     IERC20  internal constant USDC      = IERC20(0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359); // 6 decimals
+    address internal rich;
 
     function setUp() public virtual {
         vm.createSelectFork(POLYGON_RPC_URL, FORK_BLOCK_NUMBER);
+        rich = msg.sender;
+
+        _procureUsdcForAccount(
+            msg.sender, 
+            1000000 ether, // 100 MATIC to supply
+            50000 * 10 ** 6 // 500 USDC to borrow
+        );
     }
 
     /**
@@ -46,14 +54,16 @@ abstract contract BaseTest is Test {
         require(actor.balance >= maticToSupply, "Failed to deal MATIC to actor");
 
         // 2. Impersonate the actor to perform the Aave operations.
-        vm.prank(actor);
+        actor = address(this);
 
         // This entire block is now executed by `actor`
         // `msg.sender` is `actor`, and `msg.value` is paid from `actor`.
         {
+            console.log(actor);
             // Wrap MATIC into WMATIC
-            WMATIC.deposit{value: maticToSupply}();
-            console.log("Actor wrapped MATIC.");
+            WMATIC.deposit{value: maticToSupply}(maticToSupply);
+            console.log("Actor wrapped MATIC.",WMATIC.balanceOf(actor));
+            require(WMATIC.balanceOf(actor) >= maticToSupply, "Failed to wrap MATIC");
 
             // Approve Aave Pool to spend WMATIC
             WMATIC.approve(address(AAVE_POOL), maticToSupply);
@@ -64,7 +74,7 @@ abstract contract BaseTest is Test {
             console.log("Actor supplied WMATIC.");
 
             // Borrow USDC from Aave to self
-            AAVE_POOL.borrow(address(USDC), usdcToBorrow, 2, 0,actor); // Mode 2: Variable
+            AAVE_POOL.borrow(address(USDC), usdcToBorrow, 2, 0, actor); // Mode 2: Variable
             console.log("Actor borrowed USDC.");
         }
 

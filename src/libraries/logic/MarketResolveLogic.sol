@@ -35,6 +35,17 @@ library MarketResolveLogic {
         if (resolution.isMarketResolved) revert PolynanceEE.MarketAlreadyResolved();
         if (block.timestamp < rp.maturityDate) revert PolynanceEE.MarketNotMature();
         if (input.resolver != rp.curator) revert PolynanceEE.NotCurator();
+
+        (uint256 newBorrowIndex, uint256 newLiquidityIndex) = Core.updateIndices(
+            Core.UpdateIndicesInput({
+                reserve: reserve,
+                riskParams: rp
+            })
+        );
+        reserve.variableBorrowIndex = newBorrowIndex;
+        reserve.liquidityIndex = newLiquidityIndex;
+        reserve.lastUpdateTimestamp = block.timestamp;
+
         
         // Step 1: Redeem all collateral
         uint256 totalCollateralRedeemed = _redeemAllCollateral(rp);
@@ -91,6 +102,8 @@ library MarketResolveLogic {
         
         uint256 balanceAfter = IERC20(rp.supplyAsset).balanceOf(address(this));
         totalValue = balanceAfter - balanceBefore;
+
+        console.log("                                           [Resolve] 0 - Redeemed collateral: ", totalValue);
         
         return totalValue;
     }
@@ -102,7 +115,9 @@ library MarketResolveLogic {
         if (amount == 0) return;
         
         ILiquidityLayer aave = ILiquidityLayer(rp.liquidityLayer);
-        aave.repay(rp.supplyAsset, amount, rp.interestRateMode, address(this));
+        console.log("[Resolve] 1 - Repaying Aave: ", amount);
+        uint256 res = aave.repay(rp.supplyAsset, amount, rp.interestRateMode, address(this));
+        console.log("[Resolve] 2 - Aave repaid successfully", res);
     }
     
     function _withdrawFromAave(
@@ -121,7 +136,6 @@ library MarketResolveLogic {
         Storage.ReserveData storage reserve = Core.getReserveData(marketId);
         
         if (!resolution.isMarketResolved) revert PolynanceEE.MarketNotResolved();
-        if (resolution.borrowerClaimed[borrower]) revert PolynanceEE.PositionAlreadyRedeemed();
         
         Storage.UserPosition storage position = Core.getUserPosition(marketId, borrower);
         if (position.collateralAmount == 0) revert PolynanceEE.NoPositionToRedeem();
@@ -134,8 +148,6 @@ library MarketResolveLogic {
                 borrowerPool: resolution.borrowerPool
             })
         );
-        
-        resolution.borrowerClaimed[borrower] = true;
         
         if (borrowerPayout > 0) {
             IERC20(rp.supplyAsset).safeTransfer(borrower, borrowerPayout);
@@ -157,7 +169,6 @@ library MarketResolveLogic {
         Storage.ReserveData storage reserve = Core.getReserveData(marketId);
         
         if (!resolution.isMarketResolved) revert PolynanceEE.MarketNotResolved();
-        if (resolution.lpTokenClaimed[tokenId]) revert PolynanceEE.PositionAlreadyRedeemed();
         if (position.supplyAmount == 0) revert PolynanceEE.NoPositionToRedeem();
 
         // Calculate LP's share from spread pool
@@ -174,7 +185,6 @@ library MarketResolveLogic {
         uint256 currentAaveBalance = ILiquidityLayer(rp.liquidityLayer).getSupplyBalance(rp.supplyAsset, address(this));
         uint256 userAaveAmount = currentAaveBalance.percentMul(userShare);
         
-        resolution.lpTokenClaimed[tokenId] = true;
         
         address owner = ERC721(address(this)).ownerOf(tokenId);
         

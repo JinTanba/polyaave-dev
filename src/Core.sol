@@ -6,6 +6,7 @@ import {PercentageMath} from "@aave/protocol/libraries/math/PercentageMath.sol";
 import {MathUtils} from "@aave/protocol/libraries/math/MathUtils.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Storage as PolynanceStorage } from "./libraries/Storage.sol";
+import "forge-std/console.sol";
 
 library Core {
     using WadRayMath for uint256;
@@ -18,28 +19,28 @@ library Core {
 
     // ============ Storage Access Functions ============
     
-    function f() internal pure returns (PolynanceStorage.$ storage l) {
+    function f() external pure returns (PolynanceStorage.$ storage l) {
         return PolynanceStorage.f();
     }
 
-    function getMarketId(address asset, address collateralAsset) internal pure returns (bytes32 marketId) {
+    function getMarketId(address asset, address collateralAsset) external pure returns (bytes32 marketId) {
         marketId = keccak256(abi.encodePacked(asset, collateralAsset));
     }
 
-    function getReserveData(bytes32 marketId) internal view returns (PolynanceStorage.ReserveData storage reserve) {
-        return f().markets[marketId];
+    function getReserveData(bytes32 marketId) external view returns (PolynanceStorage.ReserveData storage reserve) {
+        return PolynanceStorage.f().markets[marketId];
     }
 
-    function getPositionId(bytes32 marketId, address user) internal pure returns (bytes32 positionId) {
+    function getPositionId(bytes32 marketId, address user) external pure returns (bytes32 positionId) {
         positionId = keccak256(abi.encodePacked(marketId, user));
     }
 
-    function getUserPosition(bytes32 marketId, address user) internal view returns (PolynanceStorage.UserPosition storage position) {
-        return f().positions[getPositionId(marketId, user)];
+    function getUserPosition(bytes32 marketId, address user) external view returns (PolynanceStorage.UserPosition storage position) {
+        return PolynanceStorage.f().positions[keccak256(abi.encodePacked(marketId, user))];
     }
 
-    function getResolutionData(bytes32 marketId) internal view returns(PolynanceStorage.ResolutionData storage) {
-        return f().resolutions[marketId];
+    function getResolutionData(bytes32 marketId) external view returns(PolynanceStorage.ResolutionData storage) {
+        return PolynanceStorage.f().resolutions[marketId];
     }
 
 
@@ -97,7 +98,7 @@ library Core {
     function calculateUtilization(
         uint256 totalBorrowedPrincipal,
         uint256 totalPolynanceSupply
-    ) internal pure returns (uint256) {
+    ) public pure returns (uint256) {
         if (totalPolynanceSupply == 0) return 0;
         return totalBorrowedPrincipal.rayDiv(totalPolynanceSupply);
     }
@@ -125,7 +126,7 @@ library Core {
 
     function calculateSpreadRate(
         CalcPureSpreadRateInput memory input
-    ) internal pure returns (uint256 spreadRateRay) {
+    ) public pure returns (uint256 spreadRateRay) {
         uint256 utilization = calculateUtilization(
             input.totalBorrowedPrincipal,
             input.totalPolynanceSupply
@@ -146,7 +147,7 @@ library Core {
     
     function calculateSupplyRate(
         CalcSupplyRateInput memory input
-    ) internal pure returns (uint256) {
+    ) public pure returns (uint256) {
         uint256 utilization = calculateUtilization(
             input.totalBorrowedPrincipal,
             input.totalPolynanceSupply
@@ -165,12 +166,17 @@ library Core {
 
     function updateIndices(
         UpdateIndicesInput memory input
-    ) internal view returns (
+    ) external view returns (
         uint256 newPolynanceSpreadBorrowIndex,
         uint256 newliquidityIndex
     ) {
         uint256 timeDelta = block.timestamp - input.reserve.lastUpdateTimestamp;
         PolynanceStorage.ReserveData memory reserve = input.reserve;
+
+        if(reserve.lastUpdateTimestamp == 0) {
+            console.log("INITIALIZE INDICES");
+            return (WadRayMath.RAY, WadRayMath.RAY);
+        }
 
         uint256 currentTotalSupplyPrincipal = reserve.totalScaledSupplied.rayMul(reserve.liquidityIndex);
         uint256 currentTotalBorrowedPrincipal = reserve.totalScaledBorrowed.rayMul(reserve.variableBorrowIndex);
@@ -205,7 +211,7 @@ library Core {
 
     function calculateUserTotalDebt(
         CalcUserTotalDebtInput memory input
-    ) internal pure returns (uint256 totalDebt, uint256 principalDebt, uint256 pureSpreadInterest) {
+    ) external pure returns (uint256 totalDebt, uint256 principalDebt, uint256 pureSpreadInterest) {
         uint256 totalValueAccruedFromSpread = input.scaledPolynanceSpreadDebtPrincipal.rayMul(input.currentPolynanceSpreadBorrowIndex);
         pureSpreadInterest = totalValueAccruedFromSpread > input.initialBorrowAmount ? totalValueAccruedFromSpread - input.initialBorrowAmount : 0;
         totalDebt = input.principalDebt + pureSpreadInterest;
@@ -214,20 +220,20 @@ library Core {
 
     function calculateScaledPrincipals(
         CalcScaledPrincipalsInput memory input
-    ) internal pure returns (uint256 scaledSpreadPrincipal) {
+    ) external pure returns (uint256 scaledSpreadPrincipal) {
         scaledSpreadPrincipal = input.borrowAmount.rayDiv(input.currentPolynanceSpreadBorrowIndex);
         return (scaledSpreadPrincipal);
     }
 
-    function calculateScaledValue(uint256 amount, uint256 index) internal pure returns (uint256) {
+    function calculateScaledValue(uint256 amount, uint256 index) external pure returns (uint256) {
         return amount.rayDiv(index);
     }
     
     function calculateBorrowAble(
         CalcMaxBorrowInput memory input
-    ) internal pure returns (uint256) {
+    ) external pure returns (uint256) {
         uint256 collateralValueInSupplyAsset = input.collateralAmount
-            .mulDiv(input.collateralPrice, RAY) // price is Ray
+            .mulDiv(input.collateralPrice.wadToRay(), RAY) // price is Ray
             .mulDiv(10**input.supplyAssetDecimals, 10**input.collateralAssetDecimals);
         
         return collateralValueInSupplyAsset.percentMul(input.ltv);
@@ -238,7 +244,7 @@ library Core {
         uint256 totalPolynanceSupply, // Total principal supplied by LPs to Polynance
         uint256 borrowAmount,
         uint256 maxBorrowForUser
-    ) internal pure returns (bool) {
+    ) external pure returns (bool) {
         if (borrowAmount > maxBorrowForUser) return false;
         if (newTotalBorrowed > totalPolynanceSupply) return false; // Not enough principal in Polynance
         return true;
@@ -246,14 +252,14 @@ library Core {
 
     function calculateSupplyShares(
         CalcSupplyInput memory input
-    ) internal pure returns (uint256 lpTokensToMint) {
+    ) external pure returns (uint256 lpTokensToMint) {
         lpTokensToMint = input.supplyAmount.rayDiv(input.currentLiquidityIndex);
         return lpTokensToMint;
     }
 
     function validateSupply(
         uint256 supplyAmount
-    ) internal pure returns (bool) {
+    ) external pure returns (bool) {
         return supplyAmount > 0;
     }
 
@@ -261,7 +267,7 @@ library Core {
         uint256 lpTokenAmount,
         uint256 userLPTokenBalance,
         uint256 totalAvailableLiquidity
-    ) internal pure returns (bool) {
+    ) external pure returns (bool) {
         if (lpTokenAmount == 0) return false;
         if (lpTokenAmount > userLPTokenBalance) return false;
         if (totalAvailableLiquidity == 0) return false;
@@ -277,7 +283,7 @@ library Core {
     function calculateScaledSupplyBalance(
         uint256 supplyAmount,
         uint256 currentLiquidityIndex
-    ) internal pure returns (uint256 scaledBalance) {
+    ) external pure returns (uint256 scaledBalance) {
         scaledBalance = supplyAmount.rayDiv(currentLiquidityIndex);
         return scaledBalance;
     }
@@ -317,7 +323,7 @@ library Core {
 
     function calculateThreePoolDistribution(
         CalcThreePoolDistributionInput memory input
-    ) internal pure returns (ThreePoolDistributionResult memory result) {
+    ) external pure returns (ThreePoolDistributionResult memory result) {
         // Step 1: Calculate total Polynance spread --- wrong
         //currentSpreadEarned=(scaled*index)-totalBorrowed
         uint256 currentSpreadEarned = input.totalScaledBorrowed.rayMul(input.currentBorrowIndex) - input.totalNotScaledBorrowed;
@@ -332,9 +338,19 @@ library Core {
             input.aaveCurrentTotalDebt : input.totalCollateralRedeemed;
         
         uint256 remainingFunds = input.totalCollateralRedeemed - result.aaveDebtRepaid;
+
+        console.log("                                        totalCollateralRedeemed: ", input.totalCollateralRedeemed);
+        console.log("                                        remainingFunds: ", remainingFunds, input.aaveCurrentTotalDebt);
+        console.log("                                        protocolSpreadShare: ", protocolSpreadShare);
+        console.log("                                        accumulatedSpread: ", lpSpreadShare);
+        console.log("                                        +: ", protocolSpreadShare+ lpSpreadShare);
+        console.log("                                        currentSpreadEarned: ", currentSpreadEarned);
+        console.log("                                        totalPolynanceSpread: ", totalPolynanceSpread);
+
         
         // Step 4: Distribute remaining funds to three pools
         if (remainingFunds >= protocolSpreadShare + lpSpreadShare) {
+            console.log("                                        BEST CASE: Can pay all spread obligations and excess");
             // Can pay all spread obligations
             result.protocolPool = protocolSpreadShare;
             result.lpSpreadPool = lpSpreadShare;
@@ -345,11 +361,13 @@ library Core {
             result.lpSpreadPool += lpExcessShare;
             result.borrowerPool = excess - lpExcessShare;
         } else if (remainingFunds >= protocolSpreadShare) {
+            console.log("                                        PARTIAL CASE: Can pay protocol spread fully, LP partially");
             // Can pay protocol fully, LP partially
             result.protocolPool = protocolSpreadShare;
             result.lpSpreadPool = remainingFunds - result.protocolPool;
             result.borrowerPool = 0;
         } else {
+            console.log("                                        Worst CASE: Can only pay protocol spread partially");
             // Can only pay protocol partially
             result.protocolPool = remainingFunds;
             result.lpSpreadPool = 0;
@@ -361,7 +379,7 @@ library Core {
 
     function calculateLpClaimAmount(
         CalcLpClaimInput memory input
-    ) internal pure returns (uint256 claimAmount) {
+    ) external pure returns (uint256 claimAmount) {
         if (input.totalScaledSupplied == 0) return 0;
         
         uint256 userShare = input.scaledSupplyBalance.percentDiv(input.totalScaledSupplied);
@@ -372,7 +390,7 @@ library Core {
 
     function calculateBorrowerClaimAmount(
         CalcBorrowerClaimInput memory input
-    ) internal pure returns (uint256 claimAmount) {
+    ) external pure returns (uint256 claimAmount) {
         if (input.totalCollateral == 0) return 0;
         
         claimAmount = input.borrowerPool.mulDiv(
@@ -421,7 +439,7 @@ library Core {
 
     function calculateHealthFactor(
         CalcHealthFactorInput memory input
-    ) internal pure returns (uint256 healthFactor) {
+    ) external pure returns (uint256 healthFactor) {
         if (input.userTotalDebt == 0) {
             return type(uint256).max; // Infinite health factor if no debt
         }
@@ -445,7 +463,7 @@ library Core {
 
     function calculateLiquidationAmounts(
         CalcLiquidationAmountsInput memory input
-    ) internal pure returns (LiquidationAmountsResult memory result) {
+    ) external pure returns (LiquidationAmountsResult memory result) {
         // Calculate max debt that can be repaid based on close factor
         uint256 maxDebtRepayable = input.userTotalDebt
             .percentMul(input.liquidationCloseFactor);
@@ -495,7 +513,7 @@ library Core {
 
     function validateLiquidation(
         ValidateLiquidationInput memory input
-    ) internal pure returns (bool isValid, string memory reason) {
+    ) external pure returns (bool isValid, string memory reason) {
         // Check if position is unhealthy
         if (!isLiquidatable(input.healthFactor)) {
             return (false, "Position is healthy");
@@ -529,7 +547,7 @@ library Core {
         uint256 currentScaledDebt,
         uint256 debtRepaid,
         uint256 currentBorrowIndex
-    ) internal pure returns (uint256 newScaledDebt) {
+    ) external pure returns (uint256 newScaledDebt) {
         // Calculate current total debt
         uint256 currentTotalDebt = currentScaledDebt.rayMul(currentBorrowIndex);
         

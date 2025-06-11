@@ -14,13 +14,16 @@ import "./libraries/logic/SupplyLogic.sol";
 import "./libraries/logic/LiquidationLogic.sol";
 import "./libraries/PolynanceEE.sol";
 import "./adaptor/AaveModule.sol";
-
+import {IPoolAddressesProvider} from "aave-v3-core/contracts/interfaces/IPoolAddressesPROVIDER.sol";
+import {ICreditDelegationToken} from "aave-v3-core/contracts/interfaces/ICreditDelegationToken.sol";
+import {DataTypes} from "aave-v3-core/contracts/protocol/libraries/types/DataTypes.sol";
 // OpenZeppelin contracts
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {WadRayMath} from "@aave/protocol/libraries/math/WadRayMath.sol";
 import {PercentageMath} from "@aave/protocol/libraries/math/PercentageMath.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 
 contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP") {
     using SafeERC20 for IERC20;
@@ -34,9 +37,15 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         Storage.$ storage $ = Core.f();
         $.riskParams = riskParams;
         $.nextTokenId = 1; // Start token IDs from 1
+        // Initialize the reserve for the supply asset
         address[] memory assets = new address[](1);
         assets[0] = riskParams.supplyAsset;
-        riskParams.liquidityLayer = address(new AaveModule(assets));
+        address ll = address(new AaveModule(assets));
+        $.riskParams.liquidityLayer = ll;
+        console.log("=============  Liquidity Layer Address: ", ll);
+        //approve to liquidityLayer
+        IERC20(riskParams.supplyAsset).approve(ll, type(uint256).max);
+        ICreditDelegationToken(AaveLibrary.POOL.getReserveData(riskParams.supplyAsset).variableDebtTokenAddress).approveDelegation(ll,type(uint256).max);
     }
 
     // ============ Supply Functions ============
@@ -45,21 +54,42 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         Storage.$ storage $ = Core.f();
         uint256 tokenId = $.nextTokenId;
         _mint(msg.sender, tokenId);
-        uint256 suppliedAmount = SupplyLogic.supply(msg.sender, amount, tokenId, predictionAsset);
+        
+        uint256 suppliedAmount = SupplyLogic.supply(
+            _reserve(predictionAsset),
+            _supplyPosition(tokenId),
+            msg.sender,
+            amount
+        );
         $.nextTokenId += 1;
         emit PolynanceEE.Supply(msg.sender, suppliedAmount, suppliedAmount);
     }
 
-    // ============ Borrow Functions ============
+
+    function deposit(uint256 collateralAmount, address predictionAsset) external {
+        BorrowLogic.deposit(msg.sender, collateralAmount, predictionAsset,_position(msg.sender, predictionAsset), _reserve(predictionAsset));
+        emit PolynanceEE.DepositCollateral(msg.sender, predictionAsset, collateralAmount);
+    }
+
+    function depositAndBorrow(uint256 collateralAmount, address predictionAsset) external returns (uint256) {
+        console.log("======= Deposit and Borrow =======");
+        uint256 borrowedAmount = BorrowLogic.depositAndBorrow(msg.sender, collateralAmount, predictionAsset,
+            _position(msg.sender, predictionAsset), _reserve(predictionAsset));
+        console.log("Borrowed Amount: ", borrowedAmount);
+        emit PolynanceEE.DepositAndBorrow(msg.sender, predictionAsset, collateralAmount, borrowedAmount);
+        return borrowedAmount;
+    }
 
     function borrow(uint256 amount, address predictionAsset) external {
-        uint256 borrowedAmount = BorrowLogic.borrow(msg.sender, amount, predictionAsset);
+        uint256 borrowedAmount = BorrowLogic.borrow(_position(msg.sender, predictionAsset),_reserve(predictionAsset),predictionAsset, amount, msg.sender);
         emit PolynanceEE.Borrow(msg.sender, borrowedAmount, amount);
     }
 
-    function repay(uint256 amount, address predictionAsset) external {
-        uint256 repayAmount = BorrowLogic.repay(msg.sender, amount, predictionAsset);
-        emit PolynanceEE.Repay(msg.sender, repayAmount, amount);
+    function repay(address predictionAsset) external returns (uint256) {
+        uint256 repayAmount = BorrowLogic.repay(msg.sender, predictionAsset,
+            _position(msg.sender, predictionAsset), _reserve(predictionAsset));
+        emit PolynanceEE.Repay(msg.sender, repayAmount,repayAmount);
+        return repayAmount;
     }
 
     // ============ Market Resolution Functions ============
@@ -100,7 +130,11 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         return payout;
     }
 
-    // ============ View Functions ============
+
+    function getBorrowingCapacity(address user, address predictionAsset) external view returns (uint256) {
+        return BorrowLogic.getBorrowingCapacity(user, predictionAsset,
+            _position(user, predictionAsset), _reserve(predictionAsset));
+    }
 
     function getMarketData() external view returns (
         uint256 totalSupplied,
@@ -141,43 +175,48 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         borrowRate = borrowRate + aaveRate;
     }
 
-    // ============ Admin Functions ============
-    // Note: Access control will be added later
-
-    function updateRiskParams(Storage.RiskParams memory newParams) external {
-        Storage.$ storage $ = Core.f();
-        $.riskParams = newParams;
-    }
-
-    function pauseMarket() external {
-        Storage.$ storage $ = Core.f();
-        $.riskParams.isActive = false;
-    }
-
-    function unpauseMarket() external {
-        Storage.$ storage $ = Core.f();
-        $.riskParams.isActive = true;
-    }
-
-    function collectProtocolRevenue(address to) external {
+    function _reserve(address predictionAsset) internal view returns (Storage.ReserveData storage) {
         Storage.$ storage $ = Core.f();
         Storage.RiskParams memory rp = $.riskParams;
-        bytes32 marketId = Core.getMarketId(rp.supplyAsset, rp.collateralAsset);
-        Storage.ReserveData storage reserve = Core.getReserveData(marketId);
-        Storage.ResolutionData storage resolution = Core.getResolutionData(marketId);
-        
-        uint256 totalRevenue = reserve.accumulatedReserves;
-        
-        // Add protocol pool if market is resolved and not yet claimed
-        if (resolution.isMarketResolved && !resolution.protocolClaimed && resolution.protocolPool > 0) {
-            totalRevenue += resolution.protocolPool;
-            resolution.protocolClaimed = true;
-        }
-        
-        if (totalRevenue > 0) {
-            reserve.accumulatedReserves = 0;
-            IERC20(rp.supplyAsset).safeTransfer(to, totalRevenue);
-            emit PolynanceEE.ReservesCollected(totalRevenue);
-        }
+        bytes32 marketId = Core.getMarketId(rp.supplyAsset, predictionAsset);
+        return $.markets[marketId];
+    }
+
+    function _position(address user, address predictionAsset) internal view returns (Storage.UserPosition storage) {
+        Storage.$ storage $ = Core.f();
+        Storage.RiskParams memory rp = $.riskParams;
+        bytes32 marketId = Core.getMarketId(rp.supplyAsset, predictionAsset);
+        return $.positions[keccak256(abi.encodePacked(marketId, user))];
+    }
+
+    function _supplyPosition(uint256 tokenId) internal view returns (Storage.SupplyPosition storage) {
+        Storage.$ storage $ = Core.f();
+        return $.supplyPositions[tokenId];
+    }
+
+    function getReserveData(address predictionAsset) external view returns (Storage.ReserveData memory r) {
+        r = _reserve(predictionAsset); // Ensure reserve exists
+    }
+
+    function getSupplyPosition(uint256 tokenId) external view returns (Storage.SupplyPosition memory) {
+        Storage.$ storage $ = Core.f();
+        return $.supplyPositions[tokenId];
+    }
+
+    function getUserPosition(address user, address predictionAsset) external view returns (Storage.UserPosition memory) {
+        Storage.$ storage $ = Core.f();
+        bytes32 marketId = Core.getMarketId($.riskParams.supplyAsset, predictionAsset);
+        return $.positions[Core.getPositionId(marketId, user)];
+    }
+
+    function getRiskParams() external view returns (Storage.RiskParams memory) {
+        Storage.$ storage $ = Core.f();
+        return $.riskParams;
+    }
+
+    function getResolutionData(address predictionAsset) external view returns (Storage.ResolutionData memory) {
+        Storage.$ storage $ = Core.f();
+        bytes32 marketId = Core.getMarketId($.riskParams.supplyAsset, predictionAsset);
+        return $.resolutions[marketId];
     }
 }

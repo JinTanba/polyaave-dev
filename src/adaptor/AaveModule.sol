@@ -8,13 +8,16 @@ import {WadRayMath} from "aave-v3-core/contracts/protocol/libraries/math/WadRayM
 import {PercentageMath} from "aave-v3-core/contracts/protocol/libraries/math/PercentageMath.sol";
 import {IPoolDataProvider} from "aave-v3-core/contracts/interfaces/IPoolDataPROVIDER.sol";
 import {IPoolAddressesProvider} from "aave-v3-core/contracts/interfaces/IPoolAddressesPROVIDER.sol";
+import {ICreditDelegationToken} from "aave-v3-core/contracts/interfaces/ICreditDelegationToken.sol";
 import {DataTypes} from "aave-v3-core/contracts/protocol/libraries/types/DataTypes.sol";
 import {IVariableDebtToken} from "aave-v3-core/contracts/interfaces/IVariableDebtToken.sol";
 import {IStableDebtToken} from "aave-v3-core/contracts/interfaces/IStableDebtToken.sol";
 import {MathUtils} from "aave-v3-core/contracts/protocol/libraries/math/MathUtils.sol";
-import {ICreditDelegationToken} from "aave-v3-core/contracts/interfaces/ICreditDelegationToken.sol";
 
 import "../interfaces/ILiquidityLayer.sol";
+//console
+import "forge-std/console.sol";
+
 
 /// @title AaveLibrary
 /// @notice Reusable helper library for Aave v3: supply, withdraw, borrow, repay, flash loans, and account stats
@@ -158,12 +161,12 @@ contract AaveModule is ILiquidityLayer {
         }
     }
 
-    function init(address asset) public {
+    function init(address asset) internal {
         DataTypes.ReserveData memory r = AaveLibrary.POOL.getReserveData(asset);
         address variableDebtToken = r.variableDebtTokenAddress;
         AaveLibrary.approveAll(asset);
     }
-        
+
     function supply(address asset, uint256 amount, address onBehalfOf) external override returns (uint256) {
         IERC20(asset).transferFrom(msg.sender, address(this), amount);
         AaveLibrary.supply(asset, amount, onBehalfOf);
@@ -176,6 +179,7 @@ contract AaveModule is ILiquidityLayer {
     }
 
     function borrow(address asset, uint256 amount, InterestRateMode interestRateMode, address onBehalfOf) external override returns (uint256 newScaledDebtAmount) {
+        console.log("Borrowing from Aave...",amount);
         AaveLibrary.borrow(asset, amount, interestRateMode, onBehalfOf);
         IERC20(asset).transfer(onBehalfOf, amount);
         DataTypes.ReserveData memory r = AaveLibrary.POOL.getReserveData(asset);

@@ -47,9 +47,6 @@ library Storage {
         uint256 totalCollateralRedeemed;
         uint256 aaveDebtRepaid;    // How much was repaid to Aave at resolution
         
-        // For tracking claims
-        mapping(uint256 => bool) lpTokenClaimed;
-        mapping(address => bool) borrowerClaimed;
         bool protocolClaimed;
     }
 
