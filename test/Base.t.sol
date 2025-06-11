@@ -34,8 +34,8 @@ contract PolynanceTest is Test {
 
         _procureUsdcForAccount(
             msg.sender, 
-            10000 ether, // 100 MATIC to supply
-            500 * 10 ** 6 // 500 USDC to borrow
+            1000000 ether, // 100 MATIC to supply
+            50000 * 10 ** 6 // 500 USDC to borrow
         );
     }
 

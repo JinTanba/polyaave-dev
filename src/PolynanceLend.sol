@@ -17,8 +17,6 @@ import "./adaptor/AaveModule.sol";
 import {IPoolAddressesProvider} from "aave-v3-core/contracts/interfaces/IPoolAddressesPROVIDER.sol";
 import {ICreditDelegationToken} from "aave-v3-core/contracts/interfaces/ICreditDelegationToken.sol";
 import {DataTypes} from "aave-v3-core/contracts/protocol/libraries/types/DataTypes.sol";
-
-
 // OpenZeppelin contracts
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -87,10 +85,11 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         emit PolynanceEE.Borrow(msg.sender, borrowedAmount, amount);
     }
 
-    function repay(uint256 amount, address predictionAsset) external {
-        uint256 repayAmount = BorrowLogic.repay(msg.sender, amount, predictionAsset,
+    function repay(address predictionAsset) external returns (uint256) {
+        uint256 repayAmount = BorrowLogic.repay(msg.sender, predictionAsset,
             _position(msg.sender, predictionAsset), _reserve(predictionAsset));
-        emit PolynanceEE.Repay(msg.sender, repayAmount, amount);
+        emit PolynanceEE.Repay(msg.sender, repayAmount,repayAmount);
+        return repayAmount;
     }
 
     // ============ Market Resolution Functions ============
@@ -208,5 +207,16 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         Storage.$ storage $ = Core.f();
         bytes32 marketId = Core.getMarketId($.riskParams.supplyAsset, predictionAsset);
         return $.positions[Core.getPositionId(marketId, user)];
+    }
+
+    function getRiskParams() external view returns (Storage.RiskParams memory) {
+        Storage.$ storage $ = Core.f();
+        return $.riskParams;
+    }
+
+    function getResolutionData(address predictionAsset) external view returns (Storage.ResolutionData memory) {
+        Storage.$ storage $ = Core.f();
+        bytes32 marketId = Core.getMarketId($.riskParams.supplyAsset, predictionAsset);
+        return $.resolutions[marketId];
     }
 }

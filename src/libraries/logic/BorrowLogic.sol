@@ -54,7 +54,7 @@ library BorrowLogic {
         Storage.$ storage $ = Core.f();
         Storage.RiskParams storage rp = $.riskParams;
         
-        uint256 currentPriceRay = IOracle(rp.priceOracle).getCurrentPrice(predictionAsset).wadToRay();
+        uint256 currentPriceRay = IOracle(rp.priceOracle).getCurrentPrice(predictionAsset);
         
         uint result = Core.calculateBorrowAble(
             Core.CalcMaxBorrowInput({
@@ -234,31 +234,41 @@ library BorrowLogic {
      */
     function repay(
         address borrower, 
-        uint256 amount, 
         address predictionAsset,
         Storage.UserPosition storage position,
         Storage.ReserveData storage reserve
     ) internal returns (uint256 repaidAmount) {
+        console.log("       [REPAY] 1. repay");
         Storage.$ storage $ = Core.f();
         Storage.RiskParams storage rp = $.riskParams;
         
-        
-        if (amount == 0) revert PolynanceEE.InvalidAmount();
         if (position.scaledDebtBalance == 0) revert PolynanceEE.NoDebtToRepay();
 
-        uint256 spreadAtThisRepay = position.scaledDebtBalance.rayMul(reserve.variableBorrowIndex) - position.borrowAmount;
+        
+        uint256 userDebtShare = position.scaledDebtBalance.percentDiv(reserve.totalScaledBorrowed);
+
+        console.log("       [REPAY] 1.1. position.scaledDebtBalance: ", position.scaledDebtBalance);
+        console.log("       [REPAY] 1.2. reserve.variableBorrowIndex: ", reserve.variableBorrowIndex);
+        console.log("       [REPAY] 1.3. position.borrowAmount: ", position.borrowAmount);
+       
 
         _updateIndices(predictionAsset, reserve);
         
-        reserve.accumulatedSpread += spreadAtThisRepay;
+        
         reserve.totalScaledBorrowed -= position.scaledDebtBalance;  
         reserve.totalBorrowed -= position.borrowAmount;
 
+        console.log("       [REPAY] 3. reserve.accumulatedSpread: ", reserve.accumulatedSpread);
+        console.log("       [REPAY] 4. reserve.totalScaledBorrowed: ", reserve.totalScaledBorrowed);
+        console.log("       [REPAY] 5. reserve.totalBorrowed: ", reserve.totalBorrowed);
+
         // Calculate user's share of the Aave debt using scaled balance
-        uint256 userDebtShare = position.scaledDebtBalance.percentDiv(reserve.totalScaledBorrowed);
+
+        console.log("       [REPAY] 3. userDebtShare: ", userDebtShare);
         
         // Calculate user's total debt including spread interest
-        (uint256 userTotalDebt, uint256 principalDebt,) = Core.calculateUserTotalDebt(
+        console.log("       [REPAY] userDebtShare: ", userDebtShare);
+        (uint256 userTotalDebt, uint256 principalDebt,uint256 spread) = Core.calculateUserTotalDebt(
             Core.CalcUserTotalDebtInput({
                 principalDebt: ILiquidityLayer(rp.liquidityLayer).getTotalDebt(rp.supplyAsset, address(this)).percentMul(userDebtShare),
                 scaledPolynanceSpreadDebtPrincipal: position.scaledDebtBalance,
@@ -267,12 +277,23 @@ library BorrowLogic {
             })
         );
 
-        if (amount != userTotalDebt) revert PolynanceEE.InvalidAmount();
+        reserve.accumulatedSpread += spread;
+        console.log("       [REPAY] 5. userTotalDebt: ", userTotalDebt);
+        console.log("       [REPAY] 5. principalDebt: ", principalDebt);
+        console.log("       [REPAY] 5. spread: ", spread);
+        console.log("       [REPAY] 5. reserve.totalScaledBorrowed: ", reserve.totalScaledBorrowed);
+        console.log("       [REPAY] 5. reserve.totalBorrowed: ", reserve.totalBorrowed);
+        console.log("       [REPAY] 6. reserve.accumulatedSpread: ", reserve.accumulatedSpread);
+
+        console.log("       [REPAY] userTotalDebt: ", userTotalDebt);
         repaidAmount = userTotalDebt;
 
         // Transfer repay amount and repay to Aave
         IERC20(rp.supplyAsset).safeTransferFrom(borrower, address(this), repaidAmount);
+        console.log("       [REPAY] repaidAmount: ", repaidAmount);
         ILiquidityLayer(rp.liquidityLayer).repay(rp.supplyAsset, principalDebt, rp.interestRateMode, address(this));
+
+        console.log("       [REPAY] repaidAmount: ", repaidAmount);
 
         // Clear user position and return collateral
         position.borrowAmount = 0;

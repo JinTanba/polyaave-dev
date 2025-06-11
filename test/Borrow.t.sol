@@ -5,18 +5,14 @@ import "./Base.t.sol";
 import "../src/libraries/Storage.sol";
 import "../src/libraries/PolynanceEE.sol";
 import "../src/interfaces/ILiquidityLayer.sol";
-import "../src/interfaces/Oralce.sol"; // Note: Typo in original, should be Oracle.sol if that's the filename
+import "../src/interfaces/Oralce.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {PolynanceLendingMarket} from "../src/PolynanceLend.sol";
 import {AaveLibrary} from "../src/adaptor/AaveModule.sol";
-import {IPositionToken} from "../src/interfaces/IPositionToken.sol";
-import {WadRayMath} from "@aave/protocol/libraries/math/WadRayMath.sol";
-import {PercentageMath} from "@aave/protocol/libraries/math/PercentageMath.sol";
 import "../src/Core.sol";
 
-// (Mock contracts remain the same)
+// Mock contracts
 contract MockERC20 is ERC20 {
     uint8 private _decimals;
     
@@ -30,10 +26,6 @@ contract MockERC20 is ERC20 {
     
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
-    }
-    
-    function burn(address from, uint256 amount) external {
-        _burn(from, amount);
     }
 }
 
@@ -49,53 +41,51 @@ contract MockOracle is IOracle {
     }
 }
 
-
 contract BorrowTest is PolynanceTest {
     PolynanceLendingMarket public polynanceLend;
     MockERC20 public predictionAsset;
     MockOracle public oracle;
     Storage.RiskParams public riskParams;
-    using WadRayMath for uint256;
-    using PercentageMath for uint256;
 
     address internal supplier;
     address internal borrower;
+    address internal borrower2;
     uint256 internal constant SUPPLY_AMOUNT = 100 * 10**6; // 100 USDC
+    uint256 internal constant COLLATERAL_AMOUNT = 100 ether; // 100 prediction tokens
     
-    // (setUp function remains the same)
     function setUp() public override {
         super.setUp();
+        
         // Deploy mock contracts
         predictionAsset = new MockERC20("Prediction Token", "PRED", 18);
         oracle = new MockOracle();
+        oracle.setPrice(address(predictionAsset), 0.8 * 10**18); // 0.8 USD
         
-        // Set up supplier
+        // Set up addresses
         supplier = vm.addr(1);
-        
-        // Transfer USDC from base test setup to supplier
-        USDC.transfer(supplier, 500 * 10**6); // 500 USDC
-        // Mint prediction tokens to borrower
         borrower = vm.addr(2);
+        borrower2 = vm.addr(3);
+        
+        // Transfer tokens
+        USDC.transfer(supplier, 1000 * 10**6);
+        USDC.transfer(borrower, 200 * 10**6);
+        USDC.transfer(borrower2, 200 * 10**6);
         predictionAsset.mint(borrower, 1000 ether);
-
+        predictionAsset.mint(borrower2, 1000 ether);
         
-        // Set prediction token price
-        oracle.setPrice(address(predictionAsset), 0.8 * 10**18); // 1 USD in Ray format
-        
-
         // Create risk parameters
         riskParams = Storage.RiskParams({
             interestRateMode: InterestRateMode.VARIABLE,
-            baseSpreadRate: 0.02e27, // 2% in bps
-            optimalUtilization: 0.8e27, // 80% in bps
-            slope1: 0.05e27, // 5% in bps
-            slope2: 1e27, // 100% in bps
-            reserveFactor: 1000, // 10% in bps
-            ltv: 5000, // 75% in bps
-            liquidationThreshold: 8000, // 80% in bps
-            liquidationCloseFactor: 1000, // 10% in basis points
-            liquidationBonus: 500, // 5% in basis points
-            lpShareOfRedeemed: 7000, // 70% in basis points
+            baseSpreadRate: 0.02e27,
+            optimalUtilization: 0.8e27,
+            slope1: 0.05e27,
+            slope2: 1e27,
+            reserveFactor: 1000,
+            ltv: 5000, // 50%
+            liquidationThreshold: 8000,
+            liquidationCloseFactor: 1000,
+            liquidationBonus: 500,
+            lpShareOfRedeemed: 7000,
             maturityDate: block.timestamp + 365 days,
             priceOracle: address(oracle),
             liquidityLayer: address(0),
@@ -107,96 +97,383 @@ contract BorrowTest is PolynanceTest {
             isActive: true
         });
         
-        // Deploy PolynanceLend
         polynanceLend = new PolynanceLendingMarket(riskParams);
         
-        // Approve spending
+        // Approvals
         vm.prank(supplier);
         USDC.approve(address(polynanceLend), type(uint256).max);
-
-        // Set borrower
-        console.log("Approve borrower: ", borrower);
+        
         vm.prank(borrower);
         predictionAsset.approve(address(polynanceLend), type(uint256).max);
+        vm.prank(borrower);
+        USDC.approve(address(polynanceLend), type(uint256).max);
+        
+        vm.prank(borrower2);
+        predictionAsset.approve(address(polynanceLend), type(uint256).max);
+        vm.prank(borrower2);
+        USDC.approve(address(polynanceLend), type(uint256).max);
     }
 
-    // (supplyBasic function remains the same)
-    function supplyBasic(uint256 numberOfSupplies) public {
-        for (uint256 i = 0; i <= numberOfSupplies; i++) {
-            // console.log("Supply operation #", i);
+    function supplyLiquidity(uint256 numberOfSupplies) public {
+        for (uint256 i = 0; i < numberOfSupplies; i++) {
             vm.prank(supplier);
             polynanceLend.supply(SUPPLY_AMOUNT, riskParams.collateralAsset);
         }
     }
 
-    function testDeposit() public {
-        supplyBasic(1);
-        consoleReserveAndPosition();
-        vm.startPrank(borrower);
-        polynanceLend.deposit(10 ether, riskParams.collateralAsset);
-        polynanceLend.borrow(0, riskParams.collateralAsset);
-        vm.stopPrank();
-        console.log("Borrowed amount: ", polynanceLend.getUserPosition(borrower, riskParams.collateralAsset).borrowAmount);
-        consoleReserveAndPosition();
-    }
+    // ============ BASIC TESTS ============
 
-    function testDepositAndBorrowc() public {
-        // ---------- 0. Prepare LP liquidity ----------
-        supplyBasic(1);
-
-        // ---------- 1. Set up collateral & compute expected borrow ----------
-        uint256 collateralAmount = 100 ether;
-        consoleReserveAndPosition();
+    function testDepositAndBorrow() public {
+        supplyLiquidity(5);
+        
         uint256 usdcBefore = USDC.balanceOf(borrower);
         uint256 collBefore = predictionAsset.balanceOf(borrower);
 
-        vm.startPrank(borrower);
-        uint256 borrowReturned = polynanceLend.depositAndBorrow(collateralAmount, riskParams.collateralAsset);
-        vm.stopPrank();
+        vm.prank(borrower);
+        uint256 borrowReturned = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
 
-        assertEq(predictionAsset.balanceOf(borrower), collBefore - collateralAmount, "Collateral bal mismatch");
-        assertEq(USDC.balanceOf(borrower), usdcBefore + borrowReturned, "USDC bal mismatch");
-        uint256 contractBalance = predictionAsset.balanceOf(address(polynanceLend));
-        assertEq(contractBalance ,collateralAmount, "Contract balance mismatch");
-        consoleReserveAndPosition();
-        uint256 totalDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
-        assertTrue(totalDebt >= borrowReturned, "Total debt mismatch");
+        // Check balances changed correctly
+        assertEq(predictionAsset.balanceOf(borrower), collBefore - COLLATERAL_AMOUNT, "Collateral not transferred");
+        assertEq(USDC.balanceOf(borrower), usdcBefore + borrowReturned, "USDC not received");
+        assertTrue(borrowReturned > 0, "Should have borrowed something");
         
-    }
-
-    function _computeExpectedBorrow(uint256 collateralAmount)
-        private
-        view
-        returns (uint256 expectedBorrow)
-    {
-        uint256 priceRay = (0.8e18);
-        Core.CalcMaxBorrowInput memory maxInput = Core.CalcMaxBorrowInput({
-            collateralAmount: collateralAmount,
-            collateralPrice: priceRay.wadToRay(),
-            ltv: riskParams.ltv,
-            supplyAssetDecimals: riskParams.supplyAssetDecimals,
-            collateralAssetDecimals: riskParams.collateralAssetDecimals
-        });
-        expectedBorrow = Core.calculateBorrowAble(maxInput);
-    }
-
-    function consoleReserveAndPosition() public view returns (Storage.ReserveData memory reserve) {
-        reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
-        console.log("@Reserve: ");
-        console.log("   Reserve Collateral: ", reserve.totalCollateral);
-        console.log("   Reserve Borrowed: ", reserve.totalBorrowed);
-        console.log("   Reserve Scaled Borrowed: ", reserve.totalScaledBorrowed);
-        console.log("   Reserve Variable Borrow Index: ", reserve.variableBorrowIndex);
-        console.log("   Reserve Liquidity Index: ", reserve.liquidityIndex);
-        console.log("   Reserve Last Update Timestamp: ", reserve.lastUpdateTimestamp);
-        console.log("   Reserve Total Scaled Supplied: ", reserve.totalScaledSupplied);
-
+        // Check position state
         Storage.UserPosition memory position = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
-        console.log("@Position: ");
-        console.log("   Position Collateral Amount: ", position.collateralAmount);
-        console.log("   Position Borrow Amount: ", position.borrowAmount);
-        console.log("   Position Scaled Debt Balance: ", position.scaledDebtBalance);
-        // console.log("   Position Debt Balance: ", position.scaledDebtBalance.rayMul(reserve.variableBorrowIndex));
+        assertEq(position.collateralAmount, COLLATERAL_AMOUNT, "Position collateral wrong");
+        assertEq(position.borrowAmount, borrowReturned, "Position borrow amount wrong");
+        assertTrue(position.scaledDebtBalance > 0, "Should have debt");
+        
+        console.log("Borrowed amount:", borrowReturned);
     }
 
+    function testSeparateDepositThenBorrow() public {
+        supplyLiquidity(5);
+        
+        // First deposit collateral
+        vm.prank(borrower);
+        polynanceLend.deposit(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        
+        // Check position after deposit
+        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertEq(pos1.collateralAmount, COLLATERAL_AMOUNT);
+        assertEq(pos1.borrowAmount, 0);
+        
+        // Then borrow max (amount = 0 means max)
+        uint256 usdcBefore = USDC.balanceOf(borrower);
+        vm.prank(borrower);
+        polynanceLend.borrow(0, riskParams.collateralAsset);
+        
+        uint256 borrowed = USDC.balanceOf(borrower) - usdcBefore;
+        assertTrue(borrowed > 0, "Should have borrowed");
+        
+        // Check final position
+        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertEq(pos2.borrowAmount, borrowed);
+        assertTrue(pos2.scaledDebtBalance > 0);
+    }
+
+    function testBasicRepay() public {
+        supplyLiquidity(5);
+        
+        // Borrow first
+        vm.prank(borrower);
+        uint256 borrowedAmount = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        
+        // Fast forward time to accrue some interest
+        vm.warp(block.timestamp + 30 days);
+        
+        // Check position before repay
+        Storage.UserPosition memory posBefore = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertTrue(posBefore.borrowAmount > 0, "Should have debt");
+        assertTrue(posBefore.collateralAmount > 0, "Should have collateral");
+        
+        // Calculate total debt (simplified - just use current debt for test)
+        Storage.ReserveData memory reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        uint256 totalDebt = posBefore.borrowAmount + (posBefore.borrowAmount / 100); // Add 1% for interest
+        
+        uint256 usdcBefore = USDC.balanceOf(borrower);
+        uint256 collBefore = predictionAsset.balanceOf(borrower);
+        
+        // Repay
+        vm.prank(borrower);
+        uint256 repaidAmount = polynanceLend.repay(riskParams.collateralAsset);
+        
+        // Check balances after repay
+        assertEq(USDC.balanceOf(borrower), usdcBefore - repaidAmount, "USDC not deducted correctly");
+        assertEq(predictionAsset.balanceOf(borrower), collBefore + COLLATERAL_AMOUNT, "Collateral not returned");
+        
+        // Check position is cleared
+        Storage.UserPosition memory posAfter = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertEq(posAfter.borrowAmount, 0, "Debt not cleared");
+        assertEq(posAfter.collateralAmount, 0, "Collateral not cleared");
+        assertEq(posAfter.scaledDebtBalance, 0, "Scaled debt not cleared");
+        
+        console.log("Repaid amount:", repaidAmount);
+        console.log("Original borrowed:", borrowedAmount);
+    }
+
+    function testMultipleBorrowers() public {
+        supplyLiquidity(10);
+        
+        // Both borrowers borrow
+        vm.prank(borrower);
+        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        
+        vm.prank(borrower2);
+        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, riskParams.collateralAsset);
+        
+        assertTrue(borrowed1 > 0, "Borrower 1 should have borrowed");
+        assertTrue(borrowed2 > 0, "Borrower 2 should have borrowed");
+        assertTrue(borrowed1 > borrowed2, "Borrower 1 should have borrowed more");
+        
+        // Check both have positions
+        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower2, riskParams.collateralAsset);
+        
+        assertTrue(pos1.borrowAmount > 0 && pos1.collateralAmount > 0);
+        assertTrue(pos2.borrowAmount > 0 && pos2.collateralAmount > 0);
+        
+        console.log("Borrower 1 borrowed:", borrowed1);
+        console.log("Borrower 2 borrowed:", borrowed2);
+    }
+
+    // ============ ERROR TESTS ============
+
+    function testBorrowWithoutCollateral() public {
+        supplyLiquidity(5);
+        
+        vm.prank(borrower);
+        vm.expectRevert(PolynanceEE.InsufficientCollateral.selector);
+        polynanceLend.borrow(1000000, riskParams.collateralAsset);
+    }
+
+    function testBorrowWithoutLiquidity() public {
+        // Don't supply liquidity
+        
+        vm.prank(borrower);
+        vm.expectRevert();
+        polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+    }
+
+    function testRepayWithoutDebt() public {
+        vm.prank(borrower);
+        vm.expectRevert(PolynanceEE.NoDebtToRepay.selector);
+        polynanceLend.repay(riskParams.collateralAsset);
+    }
+
+
+    // ============ AAVE DEBT TRACKING TESTS ============
+
+    function testTrackAaveDebtChanges() public {
+        supplyLiquidity(5);
+        
+        // Track initial Aave debt (should be 0)
+        uint256 initialAaveDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertEq(initialAaveDebt, 0, "Initial Aave debt should be 0");
+        
+        // Borrower 1 borrows
+        vm.prank(borrower);
+        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        
+        // Check Aave debt increased
+        uint256 aaveDebtAfterBorrow1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtAfterBorrow1 > initialAaveDebt, "Aave debt should increase after first borrow");
+        assertTrue(aaveDebtAfterBorrow1 >= borrowed1, "Aave debt should be at least borrowed amount");
+        
+        console.log("After first borrow - Aave debt:", aaveDebtAfterBorrow1);
+        console.log("Borrowed amount:", borrowed1);
+        
+        // Borrower 2 borrows
+        vm.prank(borrower2);
+        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, riskParams.collateralAsset);
+        
+        // Check Aave debt increased further
+        uint256 aaveDebtAfterBorrow2 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtAfterBorrow2 > aaveDebtAfterBorrow1, "Aave debt should increase after second borrow");
+        
+        console.log("After second borrow - Aave debt:", aaveDebtAfterBorrow2);
+        console.log("Second borrowed amount:", borrowed2);
+        
+        // Fast forward time to accrue interest
+        vm.warp(block.timestamp + 30 days);
+        
+        // Check debt increased due to interest
+        uint256 aaveDebtWithInterest = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtWithInterest >= aaveDebtAfterBorrow2, "Aave debt should increase with interest");
+        
+        console.log("After 30 days - Aave debt with interest:", aaveDebtWithInterest);
+        
+        vm.prank(borrower);
+        polynanceLend.repay(riskParams.collateralAsset);
+        
+        // Check Aave debt decreased
+        uint256 aaveDebtAfterRepay1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtAfterRepay1 < aaveDebtWithInterest, "Aave debt should decrease after repay");
+        
+        console.log("After first repay - Aave debt:", aaveDebtAfterRepay1);
+    }
+
+    function testConsistentBorrowRepayBorrowCycle() public {
+        supplyLiquidity(10); // Provide plenty of liquidity
+        
+        // ============ CYCLE 1: Borrow ============
+        uint256 initialUSDC = USDC.balanceOf(borrower);
+        uint256 initialCollateral = predictionAsset.balanceOf(borrower);
+        uint256 initialAaveDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        
+        vm.prank(borrower);
+        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        
+        // Verify state after first borrow
+        assertEq(USDC.balanceOf(borrower), initialUSDC + borrowed1, "USDC balance after borrow");
+        assertEq(predictionAsset.balanceOf(borrower), initialCollateral - COLLATERAL_AMOUNT, "Collateral balance after borrow");
+        
+        uint256 aaveDebtAfterBorrow1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtAfterBorrow1 > initialAaveDebt, "Aave debt should increase");
+        
+        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertEq(pos1.collateralAmount, COLLATERAL_AMOUNT, "Position collateral after borrow");
+        assertEq(pos1.borrowAmount, borrowed1, "Position borrow amount after borrow");
+        assertTrue(pos1.scaledDebtBalance > 0, "Should have scaled debt");
+        
+        console.log("=== CYCLE 1: BORROWED ===");
+        console.log("Borrowed amount:", borrowed1);
+        console.log("Aave debt:", aaveDebtAfterBorrow1);
+        
+        // ============ CYCLE 1: Repay ============
+        vm.warp(block.timestamp + 60 days); // Accrue some interest
+        
+        vm.prank(borrower);
+        uint256 repaid1 = polynanceLend.repay(riskParams.collateralAsset);
+
+        console.log("========================-   Initial USDC balance:", pos1.borrowAmount);
+        console.log("=========================== Repaid amount:", repaid1);
+        
+        // Verify state after repay
+        assertEq(USDC.balanceOf(borrower), initialUSDC + borrowed1 - repaid1, "USDC balance after repay");
+        assertEq(predictionAsset.balanceOf(borrower), initialCollateral, "Collateral returned after repay");
+        
+        uint256 aaveDebtAfterRepay1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtAfterRepay1 < aaveDebtAfterBorrow1, "Aave debt should decrease after repay");
+        
+        Storage.UserPosition memory pos1AfterRepay = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertEq(pos1AfterRepay.collateralAmount, 0, "Position collateral cleared after repay");
+        assertEq(pos1AfterRepay.borrowAmount, 0, "Position borrow amount cleared after repay");
+        assertEq(pos1AfterRepay.scaledDebtBalance, 0, "Scaled debt cleared after repay");
+        
+        console.log("=== CYCLE 1: REPAID ===");
+        console.log("Repaid amount:", repaid1);
+        console.log("Interest paid:", repaid1 - borrowed1);
+        console.log("Aave debt after repay:", aaveDebtAfterRepay1);
+        
+        // ============ CYCLE 2: Borrow Again ============
+        uint256 usdcBeforeCycle2 = USDC.balanceOf(borrower);
+        uint256 collateralBeforeCycle2 = predictionAsset.balanceOf(borrower);
+        
+        vm.prank(borrower);
+        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT * 3 / 4, riskParams.collateralAsset); // Borrow with less collateral
+        
+        // Verify state after second borrow
+        assertEq(USDC.balanceOf(borrower), usdcBeforeCycle2 + borrowed2, "USDC balance after second borrow");
+        assertEq(predictionAsset.balanceOf(borrower), collateralBeforeCycle2 - (COLLATERAL_AMOUNT * 3 / 4), "Collateral balance after second borrow");
+        
+        uint256 aaveDebtAfterBorrow2 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        assertTrue(aaveDebtAfterBorrow2 > aaveDebtAfterRepay1, "Aave debt should increase again");
+        
+        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        assertEq(pos2.collateralAmount, COLLATERAL_AMOUNT * 3 / 4, "Position collateral after second borrow");
+        assertEq(pos2.borrowAmount, borrowed2, "Position borrow amount after second borrow");
+        assertTrue(pos2.scaledDebtBalance > 0, "Should have scaled debt again");
+        
+        // Should borrow less with less collateral
+        assertTrue(borrowed2 < borrowed1, "Should borrow less with less collateral");
+        
+        console.log("=== CYCLE 2: BORROWED AGAIN ===");
+        console.log("Borrowed amount:", borrowed2);
+        console.log("Aave debt:", aaveDebtAfterBorrow2);
+        
+        // ============ FINAL VERIFICATION ============
+        // Check that reserve state is consistent
+        Storage.ReserveData memory finalReserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        assertEq(finalReserve.totalCollateral, COLLATERAL_AMOUNT * 3 / 4, "Reserve total collateral should match position");
+        assertEq(finalReserve.totalBorrowed, borrowed2, "Reserve total borrowed should match position");
+        assertTrue(finalReserve.totalScaledBorrowed > 0, "Reserve should have scaled borrowed amount");
+        
+        console.log("=== FINAL STATE ===");
+        console.log("Total cycles completed: 2");
+        console.log("Final Aave debt:", aaveDebtAfterBorrow2);
+        console.log("Final reserve total borrowed:", finalReserve.totalBorrowed);
+        console.log("Final reserve total collateral:", finalReserve.totalCollateral);
+    }
+
+    function testStateConsistencyAfterOperations() public {
+        supplyLiquidity(5);
+        
+        // Get initial state
+        Storage.ReserveData memory initialReserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        uint256 initialAaveDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        uint256 initialAaveBalance = AaveLibrary.getATokenBalance(address(USDC), address(polynanceLend));
+        
+        // Perform borrow
+        vm.prank(borrower);
+        uint256 borrowedAmount = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        
+        // Check state consistency after borrow
+        Storage.ReserveData memory reserveAfterBorrow = polynanceLend.getReserveData(riskParams.collateralAsset);
+        uint256 aaveDebtAfterBorrow = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        uint256 aaveBalanceAfterBorrow = AaveLibrary.getATokenBalance(address(USDC), address(polynanceLend));
+        
+        // Verify reserve changes
+        assertEq(reserveAfterBorrow.totalCollateral, initialReserve.totalCollateral + COLLATERAL_AMOUNT, "Reserve collateral should increase");
+        assertEq(reserveAfterBorrow.totalBorrowed, initialReserve.totalBorrowed + borrowedAmount, "Reserve borrowed should increase");
+        
+        // Verify Aave changes
+        assertTrue(aaveDebtAfterBorrow > initialAaveDebt, "Aave debt should increase");
+        assertTrue(aaveBalanceAfterBorrow >= initialAaveBalance, "Aave balance should not decrease"); // Supply happened first
+        
+        // The borrowed amount should have been transferred from Aave balance to user
+        // So the net effect on Aave should be that debt increased by borrowedAmount
+        assertTrue(aaveDebtAfterBorrow - initialAaveDebt >= borrowedAmount * 99 / 100, "Debt increase should approximately equal borrowed amount");
+        
+        console.log("=== STATE CONSISTENCY CHECK ===");
+        console.log("Borrowed from user perspective:", borrowedAmount);
+        console.log("Aave debt increase:", aaveDebtAfterBorrow - initialAaveDebt);
+        console.log("Reserve total borrowed:", reserveAfterBorrow.totalBorrowed);
+        console.log("Reserve total collateral:", reserveAfterBorrow.totalCollateral);
+        
+        // Verify that internal accounting matches external reality
+        assertApproxEqRel(reserveAfterBorrow.totalBorrowed, aaveDebtAfterBorrow - initialAaveDebt, 0.05e18, "Internal and external debt should roughly match");
+    }
+
+    // ============ HELPER FUNCTIONS ============
+
+    function getBorrowingCapacity(address user) public view returns (uint256) {
+        return polynanceLend.getBorrowingCapacity(user, riskParams.collateralAsset);
+    }
+
+    function logPositionState(address user, string memory label) public view {
+        Storage.UserPosition memory pos = polynanceLend.getUserPosition(user, riskParams.collateralAsset);
+        console.log(label);
+        console.log("  Collateral:", pos.collateralAmount);
+        console.log("  Borrow Amount:", pos.borrowAmount);
+        console.log("  Scaled Debt:", pos.scaledDebtBalance);
+    }
+
+    function logReserveState() public view {
+        Storage.ReserveData memory reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        console.log("Reserve State:");
+        console.log("  Total Collateral:", reserve.totalCollateral);
+        console.log("  Total Borrowed:", reserve.totalBorrowed);
+        console.log("  Total Scaled Borrowed:", reserve.totalScaledBorrowed);
+        console.log("  Borrow Index:", reserve.variableBorrowIndex);
+        console.log("  Liquidity Index:", reserve.liquidityIndex);
+    }
+
+    function logAaveState() public view {
+        uint256 aaveDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
+        uint256 aaveBalance = AaveLibrary.getATokenBalance(address(USDC), address(polynanceLend));
+        console.log("Aave State:");
+        console.log("  Protocol debt to Aave:", aaveDebt);
+        console.log("  Protocol aToken balance:", aaveBalance);
+    }
 }
