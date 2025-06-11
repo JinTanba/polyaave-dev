@@ -313,11 +313,10 @@ contract CoreTest is Test {
             liquidationCloseFactor: 5000, // 50%
             lpShareOfRedeemed: LP_SHARE_OF_REDEEMED,
             liquidationBonus: 500, // 5%
-            maturityDate: block.timestamp + 90 days,
+            limitDate: block.timestamp + 90 days,
             priceOracle: address(0x1),
             liquidityLayer: address(0x2),
             supplyAsset: address(0x3),
-            collateralAsset: address(0x4),
             supplyAssetDecimals: USDC_DECIMALS,
             collateralAssetDecimals: COLLATERAL_DECIMALS,
             curator: address(0x5),

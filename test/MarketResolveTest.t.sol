@@ -58,7 +58,7 @@ contract MockPredictionToken is MockERC20, IPositionToken {
     }
 
     
-    function redeem() external override returns (uint256) {
+    function redeem() external override {
         uint256 balance = balanceOf(msg.sender);
 
         console.log("Redeeming prediction tokens:", balance, "for", redeemToken);
@@ -71,8 +71,6 @@ contract MockPredictionToken is MockERC20, IPositionToken {
         
         // Transfer the redemption tokens
         IERC20(redeemToken).transfer(msg.sender, redeemAmount);
-        
-        return redeemAmount;
     }
 }
 
@@ -135,11 +133,10 @@ contract MarketResolveTest is PolynanceTest {
             liquidationCloseFactor: 1000,
             liquidationBonus: 500,
             lpShareOfRedeemed: 1000, // 70%
-            maturityDate: block.timestamp + 90 days, // 1 h
+            limitDate: block.timestamp + 90 days, // 1 h
             priceOracle: address(oracle),
             liquidityLayer: address(0),
             supplyAsset: address(USDC),
-            collateralAsset: address(predictionAsset),
             supplyAssetDecimals: 6,
             collateralAssetDecimals: 18,
             curator: curator,
@@ -170,7 +167,7 @@ contract MarketResolveTest is PolynanceTest {
     function supplyLiquidity(uint256 numberOfSupplies) public {
         for (uint256 i = 0; i < numberOfSupplies; i++) {
             vm.prank(supplier);
-            polynanceLend.supply(SUPPLY_AMOUNT, riskParams.collateralAsset);
+            polynanceLend.supply(SUPPLY_AMOUNT, address(predictionAsset));
         }
     }
 
@@ -180,16 +177,16 @@ contract MarketResolveTest is PolynanceTest {
         
     //     // Borrowers deposit and borrow
     //     vm.prank(borrower);
-    //     uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+    //     uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
     //     vm.prank(borrower2);
-    //     uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, riskParams.collateralAsset);
+    //     uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, address(predictionAsset));
         
     //     // Fast forward some time for interest accrual
     //     vm.warp(block.timestamp + 180 days); // 6 months
         
     //     // ============ PRE-RESOLUTION STATE ============
-    //     Storage.ReserveData memory reserveBeforeResolve = polynanceLend.getReserveData(riskParams.collateralAsset);
+    //     Storage.ReserveData memory reserveBeforeResolve = polynanceLend.getReserveData(address(predictionAsset));
     //     uint256 aaveDebtBeforeResolve = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
     //     uint256 protocolUSDCBeforeResolve = USDC.balanceOf(address(polynanceLend));
         
@@ -206,19 +203,19 @@ contract MarketResolveTest is PolynanceTest {
     //     // ============ RESOLVE MARKET ============
         
     //     // Fast forward to maturity
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
         
     //     // Only curator can resolve
     //     vm.prank(curator);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
     //     // ============ POST-RESOLUTION STATE ============
-    //     Storage.ReserveData memory reserveAfterResolve = polynanceLend.getReserveData(riskParams.collateralAsset);
+    //     Storage.ReserveData memory reserveAfterResolve = polynanceLend.getReserveData(address(predictionAsset));
     //     uint256 aaveDebtAfterResolve = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
     //     uint256 protocolUSDCAfterResolve = USDC.balanceOf(address(polynanceLend));
         
     //     // Check market is resolved and inactive using getter function
-    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(riskParams.collateralAsset);
+    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(address(predictionAsset));
         
     //     assertTrue(resolution.isMarketResolved, "Market should be resolved");
     //     assertEq(resolution.marketResolvedTimestamp, block.timestamp, "Resolution timestamp should be set");
@@ -246,7 +243,7 @@ contract MarketResolveTest is PolynanceTest {
         
     //     // Create positions
     //     vm.prank(borrower);
-    //     uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+    //     uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
 
         
     //     vm.warp(block.timestamp + 90 days);
@@ -255,12 +252,12 @@ contract MarketResolveTest is PolynanceTest {
         
     //     uint256 aaveDebtBefore = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
     //     vm.prank(curator);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
 
-    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(riskParams.collateralAsset);
+    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(address(predictionAsset));
         
     //     console.log("=== PROFITABLE OUTCOME ===");
     //     console.log("Redemption ratio: 1.2 USDC per token");
@@ -282,11 +279,11 @@ contract MarketResolveTest is PolynanceTest {
         
         // Single borrower for predictable calculations
         vm.prank(borrower);
-        uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset); // 100 prediction tokens
+        uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset)); // 100 prediction tokens
 
         
         // ============ CAPTURE PRE-RESOLUTION STATE ============
-        Storage.ReserveData memory reserveBefore = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory reserveBefore = polynanceLend.getReserveData(address(predictionAsset));
         uint256 aaveDebtBefore = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         
         console.log("=== PRE-RESOLUTION STATE FOR CORE VERIFICATION ===");
@@ -301,10 +298,10 @@ contract MarketResolveTest is PolynanceTest {
         // ============ EXECUTE RESOLUTION ============
         vm.warp(block.timestamp + 99 days); // Fast forward to maturity
         vm.prank(curator);
-        polynanceLend.resolve(riskParams.collateralAsset);
+        polynanceLend.resolve(address(predictionAsset));
         
         // ============ VERIFY ACTUAL MATCHES EXPECTED ============
-        Storage.ResolutionData memory actualResolution = polynanceLend.getResolutionData(riskParams.collateralAsset);
+        Storage.ResolutionData memory actualResolution = polynanceLend.getResolutionData(address(predictionAsset));
         uint256 aaveDebtAfter = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         
         console.log("=== ACTUAL RESOLUTION RESULTS ===");
@@ -325,17 +322,17 @@ contract MarketResolveTest is PolynanceTest {
     //     supplyLiquidity(2); // 2 supply positions (token IDs 1, 2)
         
     //     vm.prank(borrower);
-    //     uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+    //     uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
     //     vm.prank(curator);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
     //     // ============ TEST BORROWER CLAIM CALCULATION ============
         
-    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(riskParams.collateralAsset);
-    //     Storage.ReserveData memory reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
-    //     Storage.UserPosition memory borrowerPosition = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(address(predictionAsset));
+    //     Storage.ReserveData memory reserve = polynanceLend.getReserveData(address(predictionAsset));
+    //     Storage.UserPosition memory borrowerPosition = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         
     //     // Calculate expected borrower claim using Core
     //     uint256 expectedBorrowerClaim = Core.calculateBorrowerClaimAmount(
@@ -355,7 +352,7 @@ contract MarketResolveTest is PolynanceTest {
     //     // Execute claim and verify
     //     uint256 borrowerUSDCBefore = USDC.balanceOf(borrower);
     //     vm.prank(borrower);
-    //     polynanceLend.claimBorrowerPosition(riskParams.collateralAsset);
+    //     polynanceLend.claimBorrowerPosition(address(predictionAsset));
     //     uint256 actualBorrowerClaim = USDC.balanceOf(borrower) - borrowerUSDCBefore;
         
     //     assertEq(actualBorrowerClaim, expectedBorrowerClaim, "Borrower claim calculation mismatch");
@@ -382,7 +379,7 @@ contract MarketResolveTest is PolynanceTest {
     //     // Note: LP also gets their share of Aave balance, so total payout > spread claim
     //     uint256 supplierUSDCBefore = USDC.balanceOf(supplier);
     //     vm.prank(supplier);
-    //     uint256 totalLpPayout = polynanceLend.claimLpPosition(riskParams.collateralAsset, 1);
+    //     uint256 totalLpPayout = polynanceLend.claimLpPosition(address(predictionAsset), 1);
     //     uint256 actualLpReceived = USDC.balanceOf(supplier) - supplierUSDCBefore;
         
     //     assertEq(actualLpReceived, totalLpPayout, "LP payout return value mismatch");
@@ -396,38 +393,38 @@ contract MarketResolveTest is PolynanceTest {
     //     supplyLiquidity(3);
         
     //     vm.prank(borrower);
-    //     polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+    //     polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
     //     // Test resolve before maturity
     //     vm.prank(curator);
     //     vm.expectRevert(PolynanceEE.MarketNotMature.selector);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
     //     // Test resolve by non-curator
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
     //     vm.prank(borrower);
     //     vm.expectRevert(PolynanceEE.NotCurator.selector);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
     //     // Successful resolve
     //     vm.prank(curator);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
     //     // Test double resolve
     //     vm.prank(curator);
     //     vm.expectRevert(PolynanceEE.MarketAlreadyResolved.selector);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
     // }
 
     // function testResolveWithNoActivity() public {
     //     // Don't create any positions
         
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
         
     //     vm.prank(curator);
-    //     polynanceLend.resolve(riskParams.collateralAsset);
+    //     polynanceLend.resolve(address(predictionAsset));
         
-    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(riskParams.collateralAsset);
+    //     Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(address(predictionAsset));
         
     //     assertTrue(resolution.isMarketResolved, "Market should be resolved even with no activity");
     //     assertEq(resolution.totalCollateralRedeemed, 0, "No collateral to redeem");
@@ -439,7 +436,7 @@ contract MarketResolveTest is PolynanceTest {
     // ============ HELPER FUNCTIONS ============
 
     function logResolutionState() public view {
-        Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(riskParams.collateralAsset);
+        Storage.ResolutionData memory resolution = polynanceLend.getResolutionData(address(predictionAsset));
         
         console.log("=== RESOLUTION STATE ===");
         console.log("Is resolved:", resolution.isMarketResolved);

@@ -86,11 +86,10 @@ contract BorrowTest is PolynanceTest {
             liquidationCloseFactor: 1000,
             liquidationBonus: 500,
             lpShareOfRedeemed: 7000,
-            maturityDate: block.timestamp + 365 days,
+            limitDate: block.timestamp + 365 days,
             priceOracle: address(oracle),
             liquidityLayer: address(0),
             supplyAsset: address(USDC),
-            collateralAsset: address(predictionAsset),
             supplyAssetDecimals: 6,
             collateralAssetDecimals: 18,
             curator: address(this),
@@ -117,7 +116,7 @@ contract BorrowTest is PolynanceTest {
     function supplyLiquidity(uint256 numberOfSupplies) public {
         for (uint256 i = 0; i < numberOfSupplies; i++) {
             vm.prank(supplier);
-            polynanceLend.supply(SUPPLY_AMOUNT, riskParams.collateralAsset);
+            polynanceLend.supply(SUPPLY_AMOUNT, address(predictionAsset));
         }
     }
 
@@ -130,7 +129,7 @@ contract BorrowTest is PolynanceTest {
         uint256 collBefore = predictionAsset.balanceOf(borrower);
 
         vm.prank(borrower);
-        uint256 borrowReturned = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        uint256 borrowReturned = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
 
         // Check balances changed correctly
         assertEq(predictionAsset.balanceOf(borrower), collBefore - COLLATERAL_AMOUNT, "Collateral not transferred");
@@ -138,7 +137,7 @@ contract BorrowTest is PolynanceTest {
         assertTrue(borrowReturned > 0, "Should have borrowed something");
         
         // Check position state
-        Storage.UserPosition memory position = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory position = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(position.collateralAmount, COLLATERAL_AMOUNT, "Position collateral wrong");
         assertEq(position.borrowAmount, borrowReturned, "Position borrow amount wrong");
         assertTrue(position.scaledDebtBalance > 0, "Should have debt");
@@ -151,23 +150,23 @@ contract BorrowTest is PolynanceTest {
         
         // First deposit collateral
         vm.prank(borrower);
-        polynanceLend.deposit(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        polynanceLend.deposit(COLLATERAL_AMOUNT, address(predictionAsset));
         
         // Check position after deposit
-        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(pos1.collateralAmount, COLLATERAL_AMOUNT);
         assertEq(pos1.borrowAmount, 0);
         
         // Then borrow max (amount = 0 means max)
         uint256 usdcBefore = USDC.balanceOf(borrower);
         vm.prank(borrower);
-        polynanceLend.borrow(0, riskParams.collateralAsset);
+        polynanceLend.borrow(0, address(predictionAsset));
         
         uint256 borrowed = USDC.balanceOf(borrower) - usdcBefore;
         assertTrue(borrowed > 0, "Should have borrowed");
         
         // Check final position
-        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(pos2.borrowAmount, borrowed);
         assertTrue(pos2.scaledDebtBalance > 0);
     }
@@ -177,18 +176,18 @@ contract BorrowTest is PolynanceTest {
         
         // Borrow first
         vm.prank(borrower);
-        uint256 borrowedAmount = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        uint256 borrowedAmount = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
         // Fast forward time to accrue some interest
         vm.warp(block.timestamp + 30 days);
         
         // Check position before repay
-        Storage.UserPosition memory posBefore = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory posBefore = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertTrue(posBefore.borrowAmount > 0, "Should have debt");
         assertTrue(posBefore.collateralAmount > 0, "Should have collateral");
         
         // Calculate total debt (simplified - just use current debt for test)
-        Storage.ReserveData memory reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory reserve = polynanceLend.getReserveData(address(predictionAsset));
         uint256 totalDebt = posBefore.borrowAmount + (posBefore.borrowAmount / 100); // Add 1% for interest
         
         uint256 usdcBefore = USDC.balanceOf(borrower);
@@ -196,14 +195,14 @@ contract BorrowTest is PolynanceTest {
         
         // Repay
         vm.prank(borrower);
-        uint256 repaidAmount = polynanceLend.repay(riskParams.collateralAsset);
+        uint256 repaidAmount = polynanceLend.repay(address(predictionAsset));
         
         // Check balances after repay
         assertEq(USDC.balanceOf(borrower), usdcBefore - repaidAmount, "USDC not deducted correctly");
         assertEq(predictionAsset.balanceOf(borrower), collBefore + COLLATERAL_AMOUNT, "Collateral not returned");
         
         // Check position is cleared
-        Storage.UserPosition memory posAfter = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory posAfter = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(posAfter.borrowAmount, 0, "Debt not cleared");
         assertEq(posAfter.collateralAmount, 0, "Collateral not cleared");
         assertEq(posAfter.scaledDebtBalance, 0, "Scaled debt not cleared");
@@ -217,18 +216,18 @@ contract BorrowTest is PolynanceTest {
         
         // Both borrowers borrow
         vm.prank(borrower);
-        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
         vm.prank(borrower2);
-        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, riskParams.collateralAsset);
+        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, address(predictionAsset));
         
         assertTrue(borrowed1 > 0, "Borrower 1 should have borrowed");
         assertTrue(borrowed2 > 0, "Borrower 2 should have borrowed");
         assertTrue(borrowed1 > borrowed2, "Borrower 1 should have borrowed more");
         
         // Check both have positions
-        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
-        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower2, riskParams.collateralAsset);
+        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, address(predictionAsset));
+        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower2, address(predictionAsset));
         
         assertTrue(pos1.borrowAmount > 0 && pos1.collateralAmount > 0);
         assertTrue(pos2.borrowAmount > 0 && pos2.collateralAmount > 0);
@@ -244,7 +243,7 @@ contract BorrowTest is PolynanceTest {
         
         vm.prank(borrower);
         vm.expectRevert(PolynanceEE.InsufficientCollateral.selector);
-        polynanceLend.borrow(1000000, riskParams.collateralAsset);
+        polynanceLend.borrow(1000000, address(predictionAsset));
     }
 
     function testBorrowWithoutLiquidity() public {
@@ -252,13 +251,13 @@ contract BorrowTest is PolynanceTest {
         
         vm.prank(borrower);
         vm.expectRevert();
-        polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
     }
 
     function testRepayWithoutDebt() public {
         vm.prank(borrower);
         vm.expectRevert(PolynanceEE.NoDebtToRepay.selector);
-        polynanceLend.repay(riskParams.collateralAsset);
+        polynanceLend.repay(address(predictionAsset));
     }
 
 
@@ -273,7 +272,7 @@ contract BorrowTest is PolynanceTest {
         
         // Borrower 1 borrows
         vm.prank(borrower);
-        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
         // Check Aave debt increased
         uint256 aaveDebtAfterBorrow1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
@@ -285,7 +284,7 @@ contract BorrowTest is PolynanceTest {
         
         // Borrower 2 borrows
         vm.prank(borrower2);
-        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, riskParams.collateralAsset);
+        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT / 2, address(predictionAsset));
         
         // Check Aave debt increased further
         uint256 aaveDebtAfterBorrow2 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
@@ -304,7 +303,7 @@ contract BorrowTest is PolynanceTest {
         console.log("After 30 days - Aave debt with interest:", aaveDebtWithInterest);
         
         vm.prank(borrower);
-        polynanceLend.repay(riskParams.collateralAsset);
+        polynanceLend.repay(address(predictionAsset));
         
         // Check Aave debt decreased
         uint256 aaveDebtAfterRepay1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
@@ -322,7 +321,7 @@ contract BorrowTest is PolynanceTest {
         uint256 initialAaveDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         
         vm.prank(borrower);
-        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        uint256 borrowed1 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
         // Verify state after first borrow
         assertEq(USDC.balanceOf(borrower), initialUSDC + borrowed1, "USDC balance after borrow");
@@ -331,7 +330,7 @@ contract BorrowTest is PolynanceTest {
         uint256 aaveDebtAfterBorrow1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         assertTrue(aaveDebtAfterBorrow1 > initialAaveDebt, "Aave debt should increase");
         
-        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory pos1 = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(pos1.collateralAmount, COLLATERAL_AMOUNT, "Position collateral after borrow");
         assertEq(pos1.borrowAmount, borrowed1, "Position borrow amount after borrow");
         assertTrue(pos1.scaledDebtBalance > 0, "Should have scaled debt");
@@ -344,7 +343,7 @@ contract BorrowTest is PolynanceTest {
         vm.warp(block.timestamp + 60 days); // Accrue some interest
         
         vm.prank(borrower);
-        uint256 repaid1 = polynanceLend.repay(riskParams.collateralAsset);
+        uint256 repaid1 = polynanceLend.repay(address(predictionAsset));
 
         console.log("========================-   Initial USDC balance:", pos1.borrowAmount);
         console.log("=========================== Repaid amount:", repaid1);
@@ -356,7 +355,7 @@ contract BorrowTest is PolynanceTest {
         uint256 aaveDebtAfterRepay1 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         assertTrue(aaveDebtAfterRepay1 < aaveDebtAfterBorrow1, "Aave debt should decrease after repay");
         
-        Storage.UserPosition memory pos1AfterRepay = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory pos1AfterRepay = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(pos1AfterRepay.collateralAmount, 0, "Position collateral cleared after repay");
         assertEq(pos1AfterRepay.borrowAmount, 0, "Position borrow amount cleared after repay");
         assertEq(pos1AfterRepay.scaledDebtBalance, 0, "Scaled debt cleared after repay");
@@ -371,7 +370,7 @@ contract BorrowTest is PolynanceTest {
         uint256 collateralBeforeCycle2 = predictionAsset.balanceOf(borrower);
         
         vm.prank(borrower);
-        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT * 3 / 4, riskParams.collateralAsset); // Borrow with less collateral
+        uint256 borrowed2 = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT * 3 / 4, address(predictionAsset)); // Borrow with less collateral
         
         // Verify state after second borrow
         assertEq(USDC.balanceOf(borrower), usdcBeforeCycle2 + borrowed2, "USDC balance after second borrow");
@@ -380,7 +379,7 @@ contract BorrowTest is PolynanceTest {
         uint256 aaveDebtAfterBorrow2 = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         assertTrue(aaveDebtAfterBorrow2 > aaveDebtAfterRepay1, "Aave debt should increase again");
         
-        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower, riskParams.collateralAsset);
+        Storage.UserPosition memory pos2 = polynanceLend.getUserPosition(borrower, address(predictionAsset));
         assertEq(pos2.collateralAmount, COLLATERAL_AMOUNT * 3 / 4, "Position collateral after second borrow");
         assertEq(pos2.borrowAmount, borrowed2, "Position borrow amount after second borrow");
         assertTrue(pos2.scaledDebtBalance > 0, "Should have scaled debt again");
@@ -394,7 +393,7 @@ contract BorrowTest is PolynanceTest {
         
         // ============ FINAL VERIFICATION ============
         // Check that reserve state is consistent
-        Storage.ReserveData memory finalReserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory finalReserve = polynanceLend.getReserveData(address(predictionAsset));
         assertEq(finalReserve.totalCollateral, COLLATERAL_AMOUNT * 3 / 4, "Reserve total collateral should match position");
         assertEq(finalReserve.totalBorrowed, borrowed2, "Reserve total borrowed should match position");
         assertTrue(finalReserve.totalScaledBorrowed > 0, "Reserve should have scaled borrowed amount");
@@ -410,16 +409,16 @@ contract BorrowTest is PolynanceTest {
         supplyLiquidity(5);
         
         // Get initial state
-        Storage.ReserveData memory initialReserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory initialReserve = polynanceLend.getReserveData(address(predictionAsset));
         uint256 initialAaveDebt = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         uint256 initialAaveBalance = AaveLibrary.getATokenBalance(address(USDC), address(polynanceLend));
         
         // Perform borrow
         vm.prank(borrower);
-        uint256 borrowedAmount = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, riskParams.collateralAsset);
+        uint256 borrowedAmount = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
         // Check state consistency after borrow
-        Storage.ReserveData memory reserveAfterBorrow = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory reserveAfterBorrow = polynanceLend.getReserveData(address(predictionAsset));
         uint256 aaveDebtAfterBorrow = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         uint256 aaveBalanceAfterBorrow = AaveLibrary.getATokenBalance(address(USDC), address(polynanceLend));
         
@@ -448,11 +447,11 @@ contract BorrowTest is PolynanceTest {
     // ============ HELPER FUNCTIONS ============
 
     function getBorrowingCapacity(address user) public view returns (uint256) {
-        return polynanceLend.getBorrowingCapacity(user, riskParams.collateralAsset);
+        return polynanceLend.getBorrowingCapacity(user, address(predictionAsset));
     }
 
     function logPositionState(address user, string memory label) public view {
-        Storage.UserPosition memory pos = polynanceLend.getUserPosition(user, riskParams.collateralAsset);
+        Storage.UserPosition memory pos = polynanceLend.getUserPosition(user, address(predictionAsset));
         console.log(label);
         console.log("  Collateral:", pos.collateralAmount);
         console.log("  Borrow Amount:", pos.borrowAmount);
@@ -460,7 +459,7 @@ contract BorrowTest is PolynanceTest {
     }
 
     function logReserveState() public view {
-        Storage.ReserveData memory reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory reserve = polynanceLend.getReserveData(address(predictionAsset));
         console.log("Reserve State:");
         console.log("  Total Collateral:", reserve.totalCollateral);
         console.log("  Total Borrowed:", reserve.totalBorrowed);

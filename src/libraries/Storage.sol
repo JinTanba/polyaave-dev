@@ -80,13 +80,12 @@ library Storage {
         uint256 lpShareOfRedeemed;         // LP share of redeemed amount(basis points)
         
         // Market configuration
-        uint256 maturityDate;              // Prediction market resolution
+        uint256 limitDate;              // Prediction market resolution
         address priceOracle;               // Oracle for collateral valuation
         address liquidityLayer;                // Aave integration contract
         
         // Fixed asset pair
         address supplyAsset;               // Asset LPs deposit (e.g., USDC)
-        address collateralAsset;           // Prediction token
         uint256 supplyAssetDecimals;
         uint256 collateralAssetDecimals;
         
