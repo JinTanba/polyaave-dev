@@ -106,7 +106,6 @@ contract SupplyTest is PolynanceTest {
             priceOracle: address(oracle),
             liquidityLayer: address(aaveModule),
             supplyAsset: address(USDC),
-            collateralAsset: address(predictionAsset),
             supplyAssetDecimals: 6,
             collateralAssetDecimals: 18,
             curator: address(this),
@@ -137,7 +136,7 @@ contract SupplyTest is PolynanceTest {
         for (uint256 i = 1; i <= numberOfSupplies; i++) {
             console.log("Supply operation #", i);
             vm.prank(supplier);
-            polynanceLend.supply(SUPPLY_AMOUNT, riskParams.collateralAsset);
+            polynanceLend.supply(SUPPLY_AMOUNT, address(predictionAsset));
             
             // Check that position token was created for this supply
             IERC721 positionToken = IERC721(address(polynanceLend));
@@ -154,7 +153,7 @@ contract SupplyTest is PolynanceTest {
         require(supplyBalance - supplyBalanceBefore >= SUPPLY_AMOUNT * numberOfSupplies, "Total supply balance should equal all supplied amounts");
 
         //ReserveData
-        Storage.ReserveData memory reserve = polynanceLend.getReserveData(riskParams.collateralAsset);
+        Storage.ReserveData memory reserve = polynanceLend.getReserveData(address(predictionAsset));
         console.log("FINAL OUTPUT: liquidityIndex", reserve.liquidityIndex);
         console.log("   variableBorrowIndex", reserve.variableBorrowIndex);
         console.log("   totalScaledSupplied", reserve.totalScaledSupplied);

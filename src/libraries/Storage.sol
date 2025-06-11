@@ -86,7 +86,6 @@ library Storage {
         
         // Fixed asset pair
         address supplyAsset;               // Asset LPs deposit (e.g., USDC)
-        address collateralAsset;           // Prediction token
         uint256 supplyAssetDecimals;
         uint256 collateralAssetDecimals;
         

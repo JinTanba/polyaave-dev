@@ -24,6 +24,7 @@ library MarketResolveLogic {
     struct ResolveInput {
         bytes32 marketId;
         address resolver;
+        address predictionAsset;
     }
     
     function resolve(ResolveInput memory input) internal {
@@ -48,7 +49,7 @@ library MarketResolveLogic {
 
         
         // Step 1: Redeem all collateral
-        uint256 totalCollateralRedeemed = _redeemAllCollateral(rp);
+        uint256 totalCollateralRedeemed = _redeemAllCollateral(rp, input.predictionAsset);
         
         // Step 2: Get current Aave debt
         ILiquidityLayer aave = ILiquidityLayer(rp.liquidityLayer);
@@ -76,7 +77,7 @@ library MarketResolveLogic {
         // Step 5: Store resolution data
         resolution.isMarketResolved = true;
         resolution.marketResolvedTimestamp = block.timestamp;
-        resolution.finalCollateralPrice = IOracle(rp.priceOracle).getCurrentPrice(rp.collateralAsset);
+        resolution.finalCollateralPrice = IOracle(rp.priceOracle).getCurrentPrice(input.predictionAsset);
         resolution.lpSpreadPool = pools.lpSpreadPool;
         resolution.borrowerPool = pools.borrowerPool;
         resolution.protocolPool = pools.protocolPool;
@@ -94,11 +95,12 @@ library MarketResolveLogic {
     }
     
     function _redeemAllCollateral(
-        Storage.RiskParams storage rp
+        Storage.RiskParams storage rp,
+        address predictionAsset
     ) private returns (uint256 totalValue) {
         uint256 balanceBefore = IERC20(rp.supplyAsset).balanceOf(address(this));
         
-        IPositionToken(rp.collateralAsset).redeem();
+        IPositionToken(predictionAsset).redeem();
         
         uint256 balanceAfter = IERC20(rp.supplyAsset).balanceOf(address(this));
         totalValue = balanceAfter - balanceBefore;

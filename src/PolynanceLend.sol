@@ -141,11 +141,12 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         uint256 totalBorrowed,
         uint256 supplyRate,
         uint256 borrowRate,
-        uint256 utilization
+        uint256 utilization,
+        address predictionAsset
     ) {
         Storage.$ storage $ = Core.f();
         Storage.RiskParams memory rp = $.riskParams;
-        bytes32 marketId = Core.getMarketId(rp.supplyAsset, rp.collateralAsset);
+        bytes32 marketId = Core.getMarketId(rp.supplyAsset, predictionAsset);
         Storage.ReserveData storage reserve = Core.getReserveData(marketId);
         
         totalSupplied = reserve.totalScaledSupplied.rayMul(reserve.liquidityIndex);
