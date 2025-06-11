@@ -219,4 +219,9 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         bytes32 marketId = Core.getMarketId($.riskParams.supplyAsset, predictionAsset);
         return $.resolutions[marketId];
     }
+
+    function isCollection(address predictionAsset) external view returns (bool) {
+        Storage.ReserveData memory r = _reserve(predictionAsset);
+        return r.totalScaledSupplied > 0;
+    }
 }

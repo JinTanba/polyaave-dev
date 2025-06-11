@@ -58,7 +58,7 @@ contract MockPredictionToken is MockERC20, IPositionToken {
     }
 
     
-    function redeem() external override returns (uint256) {
+    function redeem() external override {
         uint256 balance = balanceOf(msg.sender);
 
         console.log("Redeeming prediction tokens:", balance, "for", redeemToken);
@@ -71,8 +71,6 @@ contract MockPredictionToken is MockERC20, IPositionToken {
         
         // Transfer the redemption tokens
         IERC20(redeemToken).transfer(msg.sender, redeemAmount);
-        
-        return redeemAmount;
     }
 }
 
