@@ -33,9 +33,19 @@ contract Deploy is Script {
         rp.lpShareOfRedeemed       = 1000;  // 10% LP share
 
         // Market meta
-        rp.maturityDate            = block.timestamp + 10 days;
-        rp.priceOracle             = address(new PriceOracle()); // <-- set your oracle address
-        rp.liquidityLayer          = address(new AaveModule()); // filled in constructor of PolynanceLendingMarket
+        rp.limitDate            = block.timestamp + 10 days;
+        address ctfe = 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E;
+        uint256 ttl = 1 days;
+        uint256 minuds = 5e6; // 0.05 USDC
+        rp.priceOracle             = address(new PriceOracle(
+            ctfe, // <-- set your Chainlink TFE address
+            ttl, // <-- set your TTL (time to live)
+            minuds // <-- set your minimum USD value for price updates
+        )); // <-- set your oracle address
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359); // Polygon USDC
+        rp.liquidityLayer          = address(new AaveModule(assets)); // filled in constructor of PolynanceLendingMarket
 
         // Asset configuration (Polygon USDC as supply asset)
         rp.supplyAsset             = address(0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359);
@@ -48,6 +58,9 @@ contract Deploy is Script {
 
         // ------------------ Deploy Contract ------------------
         market = new PolynanceLendingMarket(rp);
+        //for test
+        PriceOracle(rp.priceOracle).setFixedPrice(0.8 * 10 ** 18);
+
 
         vm.stopBroadcast();
     }

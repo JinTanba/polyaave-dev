@@ -133,7 +133,7 @@ contract MarketResolveTest is PolynanceTest {
             liquidationCloseFactor: 1000,
             liquidationBonus: 500,
             lpShareOfRedeemed: 1000, // 70%
-            maturityDate: block.timestamp + 90 days, // 1 h
+            limitDate: block.timestamp + 90 days, // 1 h
             priceOracle: address(oracle),
             liquidityLayer: address(0),
             supplyAsset: address(USDC),
@@ -203,7 +203,7 @@ contract MarketResolveTest is PolynanceTest {
     //     // ============ RESOLVE MARKET ============
         
     //     // Fast forward to maturity
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
         
     //     // Only curator can resolve
     //     vm.prank(curator);
@@ -252,7 +252,7 @@ contract MarketResolveTest is PolynanceTest {
         
     //     uint256 aaveDebtBefore = AaveLibrary.getTotalDebtBase(address(USDC), address(polynanceLend));
         
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
     //     vm.prank(curator);
     //     polynanceLend.resolve(address(predictionAsset));
         
@@ -324,7 +324,7 @@ contract MarketResolveTest is PolynanceTest {
     //     vm.prank(borrower);
     //     uint256 borrowed = polynanceLend.depositAndBorrow(COLLATERAL_AMOUNT, address(predictionAsset));
         
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
     //     vm.prank(curator);
     //     polynanceLend.resolve(address(predictionAsset));
         
@@ -401,7 +401,7 @@ contract MarketResolveTest is PolynanceTest {
     //     polynanceLend.resolve(address(predictionAsset));
         
     //     // Test resolve by non-curator
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
     //     vm.prank(borrower);
     //     vm.expectRevert(PolynanceEE.NotCurator.selector);
     //     polynanceLend.resolve(address(predictionAsset));
@@ -419,7 +419,7 @@ contract MarketResolveTest is PolynanceTest {
     // function testResolveWithNoActivity() public {
     //     // Don't create any positions
         
-    //     vm.warp(riskParams.maturityDate + 1 days);
+    //     vm.warp(riskParams.limitDate + 1 days);
         
     //     vm.prank(curator);
     //     polynanceLend.resolve(address(predictionAsset));

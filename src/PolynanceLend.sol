@@ -102,7 +102,8 @@ contract PolynanceLendingMarket is ERC721("Polynance Supply Position", "polySP")
         MarketResolveLogic.resolve(
             MarketResolveLogic.ResolveInput({
                 marketId: marketId,
-                resolver: msg.sender
+                resolver: msg.sender,
+                predictionAsset: collateralAsset
             })
         );
     }

@@ -34,7 +34,7 @@ library MarketResolveLogic {
         Storage.ResolutionData storage resolution = Core.getResolutionData(input.marketId);
         
         if (resolution.isMarketResolved) revert PolynanceEE.MarketAlreadyResolved();
-        if (block.timestamp < rp.maturityDate) revert PolynanceEE.MarketNotMature();
+        // if (block.timestamp > rp.limitDate) revert PolynanceEE.MarketNotMature();
         if (input.resolver != rp.curator) revert PolynanceEE.NotCurator();
 
         (uint256 newBorrowIndex, uint256 newLiquidityIndex) = Core.updateIndices(

@@ -102,7 +102,7 @@ contract SupplyTest is PolynanceTest {
             liquidationCloseFactor: 1000, // 10% in basis points
             liquidationBonus: 500, // 5% in basis points
             lpShareOfRedeemed: 7000, // 70% in basis points
-            maturityDate: block.timestamp + 365 days,
+            limitDate: block.timestamp + 365 days,
             priceOracle: address(oracle),
             liquidityLayer: address(aaveModule),
             supplyAsset: address(USDC),

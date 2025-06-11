@@ -208,12 +208,12 @@ contract CoreIntegrationTest is Test {
     function test_Scenario_MarketMaturityEdgeCase() public {
         // Test behavior near market maturity date
         Storage.RiskParams memory params = _getRiskParams();
-        params.maturityDate = block.timestamp + 1 days; // Market matures tomorrow
+        params.limitDate = block.timestamp + 1 days; // Market matures tomorrow
         
         Storage.ReserveData memory reserve = _getActiveReserve();
         
         // Fast forward to 1 hour before maturity
-        vm.warp(params.maturityDate - 1 hours);
+        vm.warp(params.limitDate - 1 hours);
         
         // Interest should still accumulate normally
         Core.UpdateIndicesInput memory input = Core.UpdateIndicesInput({
@@ -227,13 +227,13 @@ contract CoreIntegrationTest is Test {
         assertGt(liquidityIndex, reserve.liquidityIndex, "LP earnings accumulate until maturity");
         
         // Fast forward past maturity
-        vm.warp(params.maturityDate + 1 days);
+        vm.warp(params.limitDate + 1 days);
         
         // After maturity, the shell contracts would typically freeze operations
         // But Core calculations should still work for final settlement
         reserve.variableBorrowIndex = borrowIndex;
         reserve.liquidityIndex = liquidityIndex;
-        reserve.lastUpdateTimestamp = params.maturityDate;
+        reserve.lastUpdateTimestamp = params.limitDate;
         
         (uint256 postMaturityBorrow, uint256 postMaturityLiquidity) = Core.updateIndices(input);
         
@@ -255,11 +255,10 @@ contract CoreIntegrationTest is Test {
             liquidationCloseFactor: 5000,
             liquidationBonus: 500, // 5% bonus for liquidators
             lpShareOfRedeemed: 7000, // 70% to LPs
-            maturityDate: block.timestamp + 90 days,
+            limitDate: block.timestamp + 90 days,
             priceOracle: address(0x1),
             liquidityLayer: address(0x2),
             supplyAsset: address(0x3),
-            collateralAsset: address(0x4),
             supplyAssetDecimals: 6,
             collateralAssetDecimals: 18,
             curator: address(0x5),
