@@ -8,6 +8,8 @@ library PolynanceEE {
     event IndicesUpdated(uint256 borrowIndex, uint256 liquidityIndex);
     event ReservesCollected(uint256 amount);
     event CollateralReturned(address indexed borrower, uint256 amount);
+    event DepositCollateral(address indexed user, address indexed predictionAsset, uint256 collateralAmount);
+    event DepositAndBorrow(address indexed borrower, address indexed predictionAsset, uint256 collateralAmount, uint256 borrowedAmount);
     
     // Market Resolution Events
     event MarketResolved(bytes32 indexed marketId, uint256 finalTokenPrice, uint256 totalCollateralValue, uint256 totalSystemDebt);
